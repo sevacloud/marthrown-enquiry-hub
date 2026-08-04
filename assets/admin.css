@@ -1,0 +1,132 @@
+/**
+ * Marthrown Enquiry Hub — admin dashboard styles.
+ */
+
+.meh-wrap {
+	max-width: 1400px;
+}
+
+.meh-grid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 24px;
+	margin-top: 16px;
+}
+
+@media screen and (max-width: 1100px) {
+	.meh-grid {
+		grid-template-columns: 1fr;
+	}
+}
+
+.meh-panel {
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 6px;
+	padding: 16px 20px 20px;
+}
+
+.meh-panel h2 {
+	margin-top: 0;
+	padding-bottom: 8px;
+	border-bottom: 1px solid #f0f0f1;
+}
+
+.meh-panel h3 {
+	margin: 18px 0 8px;
+	font-size: 14px;
+	color: #1d2327;
+}
+
+.meh-count {
+	color: #646970;
+	font-weight: 400;
+}
+
+.meh-empty {
+	color: #646970;
+	font-style: italic;
+	margin: 4px 0 12px;
+}
+
+.meh-filters {
+	display: flex;
+	align-items: flex-end;
+	gap: 16px;
+	margin: 16px 0;
+	padding: 12px 16px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 6px;
+}
+
+.meh-filters label {
+	display: flex;
+	flex-direction: column;
+	font-weight: 600;
+	gap: 4px;
+}
+
+.meh-filters .meh-checkbox {
+	flex-direction: row;
+	align-items: center;
+	gap: 6px;
+	font-weight: 400;
+}
+
+.meh-enquiries-table th a {
+	text-decoration: none;
+}
+
+.meh-test-row {
+	background: #fff8e5 !important;
+}
+
+.meh-test-row td:first-child::before {
+	content: "TEST";
+	display: inline-block;
+	margin-right: 6px;
+	padding: 1px 5px;
+	font-size: 10px;
+	font-weight: 600;
+	color: #6b5411;
+	background: #fcf3d7;
+	border-radius: 3px;
+	vertical-align: middle;
+}
+
+.meh-status {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 10px;
+	font-size: 12px;
+	background: #f0f0f1;
+	color: #1d2327;
+}
+
+.meh-status-subscribed {
+	background: #d7f0dd;
+	color: #114a26;
+}
+
+.meh-status-unsubscribed,
+.meh-status-bounced {
+	background: #fce4e4;
+	color: #6b1112;
+}
+
+.meh-status-pending {
+	background: #fcf3d7;
+	color: #6b5411;
+}
+
+.meh-notice {
+	margin: 12px 0;
+	padding: 8px 12px;
+	border-left: 4px solid #2271b1;
+	background: #f6f7f7;
+}
+
+.meh-notice.is-error {
+	border-left-color: #d63638;
+}

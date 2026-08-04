@@ -1,0 +1,47 @@
+name: Deploy to Production
+
+# Merges to main (a manual action) deploy into the live plugin folder so the
+# team can test before going live. Kept separate from staging on purpose.
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy main -> live plugin folder
+    runs-on: ubuntu-latest
+    # Requires a "production" environment; add required reviewers in GitHub
+    # settings to keep this as a manual, approved step.
+    environment: production
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.1'
+
+      - name: Validate PHP syntax
+        run: |
+          find . -type f -name '*.php' -not -path './vendor/*' -print0 \
+            | xargs -0 -n1 -P4 php -l
+
+      - name: Deploy via SSH/rsync to live folder
+        uses: burnett01/rsync-deployments@7.0.2
+        with:
+          switches: -avzr --delete --exclude='.git*' --exclude='.github' --exclude='node_modules'
+          path: ./
+          # Target the live plugin directory.
+          remote_path: ${{ secrets.WP_PLUGINS_PATH }}/marthrown-enquiry-hub/
+          remote_host: ${{ secrets.SSH_HOST }}
+          remote_port: ${{ secrets.SSH_PORT }}
+          remote_user: ${{ secrets.SSH_USER }}
+          remote_key: ${{ secrets.SSH_PRIVATE_KEY }}
