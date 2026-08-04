@@ -2,6 +2,23 @@
  * Marthrown Enquiry Hub — admin dashboard styles.
  */
 
+.meh-staging-banner {
+	position: sticky;
+	top: 0;
+	z-index: 9990;
+	margin: 0 0 0 -20px;
+	padding: 6px 16px;
+	width: calc(100% + 20px);
+	box-sizing: border-box;
+	background: #d63638;
+	color: #fff;
+	font-size: 12px;
+	font-weight: 600;
+	line-height: 1.4;
+	text-align: center;
+	letter-spacing: 0.02em;
+}
+
 .meh-wrap {
 	max-width: 1400px;
 }

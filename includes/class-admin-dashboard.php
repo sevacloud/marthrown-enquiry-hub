@@ -30,6 +30,39 @@ class AdminDashboard {
 	public static function init() {
 		add_action( 'admin_menu', array( __CLASS__, 'register_menu' ) );
 		add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_assets' ) );
+		add_action( 'in_admin_header', array( __CLASS__, 'maybe_render_staging_banner' ) );
+	}
+
+	/**
+	 * Whether the current admin screen is one of this plugin's pages.
+	 *
+	 * Matches both the dashboard (`marthrown-enquiry-hub`) and the settings
+	 * page (`marthrown-enquiry-hub-settings`), which share the slug prefix.
+	 *
+	 * @return bool
+	 */
+	protected static function is_plugin_page() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- reading the current screen param, not processing input.
+		$page = isset( $_GET['page'] ) ? sanitize_key( wp_unslash( $_GET['page'] ) ) : '';
+		return '' !== $page && 0 === strpos( $page, self::MENU_SLUG );
+	}
+
+	/**
+	 * Render a thin red sticky banner on this plugin's pages when running in
+	 * staging, so it's obvious the copy in use is the in-development build.
+	 */
+	public static function maybe_render_staging_banner() {
+		if ( ! self::is_plugin_page() ) {
+			return;
+		}
+		if ( ! ( function_exists( 'meh_is_staging' ) && meh_is_staging() ) ) {
+			return;
+		}
+		?>
+		<div class="meh-staging-banner">
+			<?php esc_html_e( 'Marthrown Enquiry Hub — STAGING / development build. Records created here are test data.', 'marthrown-enquiry-hub' ); ?>
+		</div>
+		<?php
 	}
 
 	/**
@@ -52,8 +85,10 @@ class AdminDashboard {
 	 *
 	 * @param string $hook Current admin page hook.
 	 */
-	public static function enqueue_assets( $hook ) {
-		if ( 'toplevel_page_' . self::MENU_SLUG !== $hook ) {
+	public static function enqueue_assets() {
+		// Load on both the dashboard and the settings page (shared slug prefix)
+		// so the styles — including the staging banner — apply to both.
+		if ( ! self::is_plugin_page() ) {
 			return;
 		}
 		wp_enqueue_style( 'meh-admin', MEH_PLUGIN_URL . 'assets/admin.css', array(), MEH_VERSION );
