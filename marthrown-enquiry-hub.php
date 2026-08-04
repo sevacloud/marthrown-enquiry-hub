@@ -144,6 +144,13 @@ function meh_activate() {
 		\MarthrownEnquiryHub\Cron::schedule_events();
 	}
 
+	// Register the /bookings rewrite rule before flushing so the pretty URL
+	// works immediately after activation.
+	require_once MEH_INCLUDES_DIR . 'class-frontend-bookings.php';
+	if ( class_exists( '\MarthrownEnquiryHub\FrontendBookings' ) ) {
+		\MarthrownEnquiryHub\FrontendBookings::add_rewrite();
+	}
+
 	// Store the version so we can run upgrade routines later.
 	update_option( 'meh_version', MEH_VERSION );
 
@@ -197,11 +204,13 @@ function meh_bootstrap() {
 	require_once MEH_INCLUDES_DIR . 'class-cron.php';
 	require_once MEH_INCLUDES_DIR . 'class-admin-dashboard.php';
 	require_once MEH_INCLUDES_DIR . 'class-settings.php';
+	require_once MEH_INCLUDES_DIR . 'class-frontend-bookings.php';
 
 	// Boot the pieces that register hooks.
 	\MarthrownEnquiryHub\SourceWebform::init();
 	\MarthrownEnquiryHub\Cron::init();
 	\MarthrownEnquiryHub\AdminDashboard::init();
 	\MarthrownEnquiryHub\Settings::init();
+	\MarthrownEnquiryHub\FrontendBookings::init();
 }
 add_action( 'plugins_loaded', 'meh_bootstrap' );

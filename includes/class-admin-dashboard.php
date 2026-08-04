@@ -102,51 +102,63 @@ class AdminDashboard {
 		if ( ! current_user_can( self::CAPABILITY ) ) {
 			return;
 		}
+		?>
+		<div class="wrap meh-wrap">
+			<h1><?php esc_html_e( 'Enquiry Hub', 'marthrown-enquiry-hub' ); ?></h1>
+			<?php self::render_dashboard_content(); ?>
+		</div>
+		<?php
+	}
 
+	/**
+	 * Render the filters + enquiries table.
+	 *
+	 * Shared by the admin page and the front-end /bookings route, so both show
+	 * the same data, filtering and sorting.
+	 */
+	public static function render_dashboard_content() {
 		// Read filter/sort params.
+		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- read-only listing filters, no state change.
 		$source_filter = isset( $_GET['source'] ) ? sanitize_key( wp_unslash( $_GET['source'] ) ) : '';
 		$date_from     = isset( $_GET['from'] ) ? sanitize_text_field( wp_unslash( $_GET['from'] ) ) : '';
 		$date_to       = isset( $_GET['to'] ) ? sanitize_text_field( wp_unslash( $_GET['to'] ) ) : '';
 		$orderby       = isset( $_GET['orderby'] ) ? sanitize_key( wp_unslash( $_GET['orderby'] ) ) : 'date';
 		$order         = ( isset( $_GET['order'] ) && 'asc' === strtolower( $_GET['order'] ) ) ? 'asc' : 'desc';
 		$hide_test     = ! empty( $_GET['hide_test'] );
+		// phpcs:enable WordPress.Security.NonceVerification.Recommended
 
 		$source_tags = self::get_source_tags();
 		$rows        = self::get_rows( $source_tags, $source_filter, $date_from, $date_to, $hide_test );
 		$rows        = self::sort_rows( $rows, $orderby, $order );
 		?>
-		<div class="wrap meh-wrap">
-			<h1><?php esc_html_e( 'Enquiry Hub', 'marthrown-enquiry-hub' ); ?></h1>
+		<?php self::render_filters( $source_tags, $source_filter, $date_from, $date_to, $hide_test ); ?>
 
-			<?php self::render_filters( $source_tags, $source_filter, $date_from, $date_to, $hide_test ); ?>
-
-			<table class="widefat striped meh-enquiries-table">
-				<thead>
-					<tr>
-						<th><?php esc_html_e( 'Name', 'marthrown-enquiry-hub' ); ?></th>
-						<th><?php echo self::sortable_header( __( 'Source', 'marthrown-enquiry-hub' ), 'source', $orderby, $order ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></th>
-						<th><?php esc_html_e( 'Latest Note', 'marthrown-enquiry-hub' ); ?></th>
-						<th><?php esc_html_e( 'Status', 'marthrown-enquiry-hub' ); ?></th>
-						<th><?php echo self::sortable_header( __( 'Date', 'marthrown-enquiry-hub' ), 'date', $orderby, $order ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></th>
-					</tr>
-				</thead>
-				<tbody>
-					<?php if ( empty( $rows ) ) : ?>
-						<tr><td colspan="5" class="meh-empty"><?php esc_html_e( 'No enquiries found.', 'marthrown-enquiry-hub' ); ?></td></tr>
-					<?php else : ?>
-						<?php foreach ( $rows as $row ) : ?>
-							<tr class="<?php echo ! empty( $row['is_test'] ) ? 'meh-test-row' : ''; ?>">
-								<td><?php echo esc_html( $row['name'] ); ?></td>
-								<td><?php echo esc_html( $row['source_label'] ); ?></td>
-								<td><?php echo esc_html( $row['note'] ); ?></td>
-								<td><span class="meh-status meh-status-<?php echo esc_attr( $row['status'] ); ?>"><?php echo esc_html( ucfirst( $row['status'] ) ); ?></span></td>
-								<td><?php echo esc_html( $row['date'] ); ?></td>
-							</tr>
-						<?php endforeach; ?>
-					<?php endif; ?>
-				</tbody>
-			</table>
-		</div>
+		<table class="widefat striped meh-enquiries-table">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'Name', 'marthrown-enquiry-hub' ); ?></th>
+					<th><?php echo self::sortable_header( __( 'Source', 'marthrown-enquiry-hub' ), 'source', $orderby, $order ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></th>
+					<th><?php esc_html_e( 'Latest Note', 'marthrown-enquiry-hub' ); ?></th>
+					<th><?php esc_html_e( 'Status', 'marthrown-enquiry-hub' ); ?></th>
+					<th><?php echo self::sortable_header( __( 'Date', 'marthrown-enquiry-hub' ), 'date', $orderby, $order ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php if ( empty( $rows ) ) : ?>
+					<tr><td colspan="5" class="meh-empty"><?php esc_html_e( 'No enquiries found.', 'marthrown-enquiry-hub' ); ?></td></tr>
+				<?php else : ?>
+					<?php foreach ( $rows as $row ) : ?>
+						<tr class="<?php echo ! empty( $row['is_test'] ) ? 'meh-test-row' : ''; ?>">
+							<td><?php echo esc_html( $row['name'] ); ?></td>
+							<td><?php echo esc_html( $row['source_label'] ); ?></td>
+							<td><?php echo esc_html( $row['note'] ); ?></td>
+							<td><span class="meh-status meh-status-<?php echo esc_attr( $row['status'] ); ?>"><?php echo esc_html( ucfirst( $row['status'] ) ); ?></span></td>
+							<td><?php echo esc_html( $row['date'] ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				<?php endif; ?>
+			</tbody>
+		</table>
 		<?php
 	}
 

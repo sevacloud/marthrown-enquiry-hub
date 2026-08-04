@@ -119,6 +119,29 @@ The mirror is additive/update-only (no `--delete`), matching the sibling
 projects, so removing a file from the repo won't delete it on the server. Add
 `options: --delete` to a workflow if you want an exact mirror.
 
+## Front-end bookings page (`/bookings`)
+
+The hub is also available on the front end at `https://<site>/bookings`, without
+creating a WordPress page. A rewrite rule serves a self-contained, `noindex`
+page that reuses the dashboard's table.
+
+Access is restricted:
+
+- Not logged in → redirected to `wp-login` and back to `/bookings` after login.
+- Logged in without permission → `403`.
+- Allowed roles: `administrator`, `manager`, `operations` (administrators always
+  pass). Adjust with the `meh_bookings_allowed_roles` filter:
+
+```php
+add_filter( 'meh_bookings_allowed_roles', function ( $roles ) {
+    $roles[] = 'events_team';
+    return $roles;
+} );
+```
+
+The rewrite rule is registered and flushed on activation. If `/bookings` returns
+a 404 after an update, re-save permalinks (Settings → Permalinks) to flush rules.
+
 ## Staging test records
 
 The staging copy deploys to `marthrown-enquiry-hub-staging/` on the same
