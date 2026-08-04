@@ -1,7 +1,8 @@
 name: Deploy to Staging
 
 # Pushes to the develop branch deploy into a "-staging" plugin folder on the
-# WordPress site so changes can be tested in isolation from live.
+# WordPress site (IONOS) via SFTP, so changes can be tested in isolation from
+# live. Uses the same lftp-mirror approach proven on property-portal-core.
 
 on:
   push:
@@ -21,6 +22,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Set up PHP
         uses: shivammathur/setup-php@v2
@@ -44,15 +47,18 @@ jobs:
           }
           PHP
 
-      - name: Deploy via SSH/rsync to staging folder
-        uses: burnett01/rsync-deployments@v9
+      - name: Deploy via SFTP (lftp mirror)
+        uses: pressidium/lftp-mirror-action@v1
         with:
-          # Exclude repo/dev files; deploy plugin source only.
-          switches: -avzr --delete --exclude='.git*' --exclude='.github' --exclude='node_modules'
-          path: ./
+          host: ${{ secrets.SFTP_HOST }}
+          port: ${{ secrets.SFTP_PORT }}
+          user: ${{ secrets.SFTP_USER }}
+          pass: ${{ secrets.SFTP_PASS }}
+          localDir: .
           # Target the "-staging" plugin directory.
-          remote_path: ${{ secrets.WP_PLUGINS_PATH }}/marthrown-enquiry-hub-staging/
-          remote_host: ${{ secrets.SSH_HOST }}
-          remote_port: ${{ secrets.SSH_PORT }}
-          remote_user: ${{ secrets.SSH_USER }}
-          remote_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          remoteDir: ${{ secrets.SFTP_REMOTE_DIR }}/marthrown-enquiry-hub-staging
+          reverse: true
+          restoreMTime: true
+          # Skip repo/dev files (see .lftp_ignore).
+          ignoreFile: .lftp_ignore
+          parallel: 3

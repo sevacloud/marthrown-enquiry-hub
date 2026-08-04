@@ -87,12 +87,37 @@ The latest enquiry note is stored per subscriber via `SubscriberMeta`
 
 ## Deployment
 
-Deployment is handled by GitHub Actions (see `.github/workflows`).
+Deployment is handled by GitHub Actions (see `.github/workflows`) over **SFTP**
+using `pressidium/lftp-mirror-action` (lftp mirror), the same approach proven on
+the IONOS-hosted sibling projects. It works on managed hosts with SFTP-only
+access and no shell.
 
-- Pushes to the **`develop`** branch deploy to a **`-staging`** folder on the
-  WordPress site.
-- Merging to **`main`** (manual action only) deploys to the live plugin folder
-  for pre-release testing.
+- Pushes to the **`develop`** branch deploy to the **`marthrown-enquiry-hub-staging`**
+  folder on the WordPress site.
+- Merging to **`main`** (manual action only) deploys to the live
+  **`marthrown-enquiry-hub`** folder for pre-release testing.
+
+Repo/dev files are skipped via `.lftp_ignore`. Checkout uses `fetch-depth: 0`
+so `restoreMTime` can set file times from git history and avoid re-uploading
+everything each run.
+
+### Required repository secrets
+
+| Secret            | Purpose                                                       |
+| ----------------- | ------------------------------------------------------------- |
+| `SFTP_HOST`       | SFTP host                                                     |
+| `SFTP_PORT`       | SFTP port (e.g. 22)                                           |
+| `SFTP_USER`       | SFTP username                                                 |
+| `SFTP_PASS`       | SFTP password                                                 |
+| `SFTP_REMOTE_DIR` | Path to the site's `wp-content/plugins` dir (no trailing `/`) |
+
+The workflows append the plugin folder to `SFTP_REMOTE_DIR`
+(`…/marthrown-enquiry-hub-staging` for develop, `…/marthrown-enquiry-hub` for
+main), so a single path secret covers both targets.
+
+The mirror is additive/update-only (no `--delete`), matching the sibling
+projects, so removing a file from the repo won't delete it on the server. Add
+`options: --delete` to a workflow if you want an exact mirror.
 
 ## Staging test records
 

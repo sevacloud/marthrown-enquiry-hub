@@ -1,0 +1,12 @@
+# Github Action: Deploy to host
+.git/
+.github/
+.vscode/
+*.log
+node_modules/
+dist/
+.DS_Store
+Thumbs.db
+.lftp_ignore
+.gitignore
+readme.md
