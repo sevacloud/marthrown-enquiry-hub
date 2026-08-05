@@ -67,6 +67,50 @@ class RestBookings {
 				),
 			)
 		);
+
+		register_rest_route(
+			self::NAMESPACE,
+			'/bookings/calendar',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( __CLASS__, 'get_calendar' ),
+				'permission_callback' => array( Auth::class, 'rest_permission' ),
+				'args'                => array(
+					'month' => array(
+						'sanitize_callback' => 'sanitize_text_field',
+						'validate_callback' => function ( $value ) {
+							return '' === $value || (bool) preg_match( '/^\d{4}-\d{2}$/', $value );
+						},
+					),
+				),
+			)
+		);
+	}
+
+	/**
+	 * GET /bookings/calendar handler — site-wide month overview.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response
+	 */
+	public static function get_calendar( $request ) {
+		$month = (string) $request->get_param( 'month' );
+
+		if ( ! SourceWpbs::available() ) {
+			return new \WP_REST_Response(
+				array(
+					'available' => false,
+					'month'     => $month,
+					'days'      => 0,
+					'calendars' => array(),
+				),
+				200
+			);
+		}
+
+		$data              = SourceWpbs::get_calendar_month( $month );
+		$data['available'] = true;
+		return new \WP_REST_Response( $data, 200 );
 	}
 
 	/**

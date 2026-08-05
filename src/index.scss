@@ -198,3 +198,150 @@
 		color: #d63638;
 	}
 }
+
+/* --- Layout + side nav --- */
+
+.meh-layout {
+	display: flex;
+	align-items: flex-start;
+	gap: 20px;
+}
+
+.meh-sidenav {
+	flex: 0 0 180px;
+	position: sticky;
+	top: 40px;
+
+	&__title {
+		font-size: 14px;
+		margin: 8px 0;
+	}
+
+	ul {
+		margin: 0;
+		list-style: none;
+	}
+
+	li button {
+		display: block;
+		width: 100%;
+		text-align: left;
+		padding: 8px 12px;
+		margin: 0 0 4px;
+		background: #fff;
+		border: 1px solid #dcdcde;
+		border-radius: 4px;
+		cursor: pointer;
+		font-size: 13px;
+
+		&.is-active {
+			background: #2271b1;
+			border-color: #2271b1;
+			color: #fff;
+			font-weight: 600;
+		}
+	}
+}
+
+.meh-main {
+	flex: 1 1 auto;
+	min-width: 0;
+}
+
+.meh-export-button {
+	margin-left: auto;
+}
+
+/* --- Calendar overview --- */
+
+.meh-calendar-nav {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+
+	.meh-calendar-month {
+		min-width: 74px;
+		text-align: center;
+	}
+}
+
+.meh-calendar-loading {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 24px;
+	color: #646970;
+}
+
+.meh-calendar-row {
+	display: flex;
+	align-items: stretch;
+	border-bottom: 1px solid #f0f0f1;
+
+	&:first-child {
+		border-top: 1px solid #f0f0f1;
+	}
+}
+
+.meh-calendar-rowhead {
+	flex: 0 0 160px;
+	padding: 6px 10px;
+	font-weight: 600;
+	border-right: 1px solid #dcdcde;
+	background: #f6f7f7;
+
+	.meh-count {
+		font-weight: 400;
+		color: #646970;
+	}
+}
+
+.meh-calendar-lanes {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow-x: auto;
+	padding: 4px 0;
+}
+
+.meh-calendar-daygrid,
+.meh-calendar-lane {
+	display: grid;
+	min-width: 620px;
+}
+
+.meh-calendar-daygrid {
+	margin-bottom: 2px;
+
+	.meh-calendar-daycell {
+		font-size: 9px;
+		color: #a7aaad;
+		text-align: center;
+		border-left: 1px solid #f6f7f7;
+	}
+}
+
+.meh-calendar-lane {
+	margin-bottom: 2px;
+}
+
+.meh-calendar-empty {
+	color: #c3c4c7;
+	padding: 2px 6px;
+}
+
+.meh-calendar-booking {
+	display: block;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	padding: 2px 6px;
+	border-radius: 3px;
+	font-size: 11px;
+	line-height: 1.6;
+	color: #fff;
+	text-decoration: none;
+
+	&.meh-cal-status-pending {
+		opacity: 0.7;
+	}
+}

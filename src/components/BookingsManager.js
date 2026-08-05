@@ -11,7 +11,7 @@ import { __ } from '@wordpress/i18n';
 import { useState, useCallback } from '@wordpress/element';
 import { Spinner, Notice, CheckboxControl } from '@wordpress/components';
 import usePolling from '../hooks/usePolling';
-import { getBookings } from '../api';
+import { getBookings, bookingsExportUrl } from '../api';
 
 const TABS = [
 	{ key: 'all', label: __( 'All', 'marthrown-enquiry-hub' ) },
@@ -142,6 +142,18 @@ export default function BookingsManager() {
 					onChange={ setHidePast }
 					__nextHasNoMarginBottom
 				/>
+				<a
+					className="button meh-export-button"
+					href={ bookingsExportUrl( {
+						status,
+						s: search,
+						from,
+						to,
+						hide_past: hidePast ? 1 : 0,
+					} ) }
+				>
+					{ __( 'Export CSV', 'marthrown-enquiry-hub' ) }
+				</a>
 			</div>
 
 			<table className="widefat striped meh-table wpbs-bm-table">

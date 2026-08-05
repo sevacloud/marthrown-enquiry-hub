@@ -53,6 +53,31 @@ export async function getBookings( params = {} ) {
 }
 
 /**
+ * Fetch the site-wide calendar overview for a month.
+ *
+ * @param {string} month 'YYYY-MM' (empty = current month).
+ * @return {Promise<{month: string, days: number, calendars: Array, available: boolean}>}
+ */
+export function getCalendar( month = '' ) {
+	return apiFetch( { path: addQueryArgs( 'bookings/calendar', { month } ) } );
+}
+
+/**
+ * Build the CSV export download URL for the current booking filters.
+ *
+ * @param {Object} filters { status, s, from, to, hide_past }
+ * @return {string}
+ */
+export function bookingsExportUrl( filters = {} ) {
+	const data = window.mehData || {};
+	return addQueryArgs( data.exportBase, {
+		action: data.exportAction,
+		_wpnonce: data.exportNonce,
+		...filters,
+	} );
+}
+
+/**
  * apiFetch returning both the parsed body (as { items, ... }) and the raw
  * response (for pagination headers). Used by list endpoints that return an
  * envelope object.

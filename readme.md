@@ -45,6 +45,10 @@ PHP is a pure REST API layer; the UI is a React app built with
 | `GET /enquiries`                      | Paginated, filterable by source/status/date    |
 | `POST /enquiries/{id}/status`         | Set enquiry status (new/replied/resolved)      |
 | `GET /bookings?status=…&s=&from=&to=&hide_past=` | Booking list, paginated, with status counts |
+| `GET /bookings/calendar?month=YYYY-MM` | Site-wide month overview (cached), all calendars |
+
+CSV export is a separate nonce-protected `admin-post.php` action
+(`meh_export_bookings`) that streams the file, honouring the current filters.
 
 Auth is via the WP REST nonce (`X-WP-Nonce`), same-origin. `permission_callback`
 allows the `administrator`, `manager`, and `operations` roles (see `Auth`).
@@ -60,9 +64,25 @@ into FluentCRM — and use WPBS's native statuses:
 - Columns: ID, Calendar, Guest, Start date, End date, Stay length, Status, and a
   **View** link that opens the booking in WP Booking System.
 
-The calendar view and per-booking editing remain in WP Booking System; this hub
-does not duplicate them. The **New enquiries** panel sits above the Bookings
-Manager.
+- **Export CSV** streams the currently-filtered bookings.
+
+Per-booking editing remains in WP Booking System (the **View** link). A
+site-wide **Calendar** overview is available from the side nav.
+
+### Calendar overview
+
+The side nav has a **Calendar** view: a site-wide month grid across all
+calendars, showing pending/accepted bookings as bars. To keep it fast on large
+datasets it:
+
+- loads **lazily** — only when the Calendar tab is opened, so it never blocks
+  the Overview;
+- fetches **one month at a time** via `GET /bookings/calendar`;
+- is **cached server-side** for a few minutes (filter `meh_calendar_cache_ttl`);
+- has **no background polling** (manual Refresh + month navigation instead).
+
+Layout is a side nav: **Overview** (New enquiries + Bookings Manager) and
+**Calendar**.
 
 ### File structure
 

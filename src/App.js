@@ -1,11 +1,21 @@
 /**
- * App — New Enquiries pinned at the top, then the WPBS-style Bookings Manager.
+ * App — side nav switching between the Overview (New Enquiries + Bookings
+ * Manager) and the site-wide Calendar. The Calendar view mounts only when
+ * selected, so its heavier data loads lazily and never blocks the overview.
  */
 import { __ } from '@wordpress/i18n';
+import { useState } from '@wordpress/element';
 import EnquiryManager from './components/EnquiryManager';
 import BookingsManager from './components/BookingsManager';
+import CalendarView from './components/CalendarView';
+
+const NAV = [
+	{ key: 'overview', label: __( 'Overview', 'marthrown-enquiry-hub' ) },
+	{ key: 'calendar', label: __( 'Calendar', 'marthrown-enquiry-hub' ) },
+];
 
 export default function App() {
+	const [ view, setView ] = useState( 'overview' );
 	const isStaging = !! ( window.mehData && window.mehData.isStaging );
 
 	return (
@@ -19,21 +29,49 @@ export default function App() {
 				</div>
 			) }
 
-			<h1 className="meh-app__title">
-				{ __( 'Enquiry Hub', 'marthrown-enquiry-hub' ) }
-			</h1>
+			<div className="meh-layout">
+				<nav className="meh-sidenav">
+					<h2 className="meh-sidenav__title">
+						{ __( 'Enquiry Hub', 'marthrown-enquiry-hub' ) }
+					</h2>
+					<ul>
+						{ NAV.map( ( item ) => (
+							<li key={ item.key }>
+								<button
+									type="button"
+									className={
+										view === item.key ? 'is-active' : ''
+									}
+									onClick={ () => setView( item.key ) }
+								>
+									{ item.label }
+								</button>
+							</li>
+						) ) }
+					</ul>
+				</nav>
 
-			{ /* New enquiries first — the daily triage list. */ }
-			<div className="meh-section">
-				<EnquiryManager
-					title={ __( 'New enquiries', 'marthrown-enquiry-hub' ) }
-					defaultStatus="new"
-				/>
-			</div>
+				<main className="meh-main">
+					{ view === 'overview' && (
+						<>
+							<div className="meh-section">
+								<EnquiryManager
+									title={ __( 'New enquiries', 'marthrown-enquiry-hub' ) }
+									defaultStatus="new"
+								/>
+							</div>
+							<div className="meh-section">
+								<BookingsManager />
+							</div>
+						</>
+					) }
 
-			{ /* Bookings Manager — mirrors the WP Booking System list view. */ }
-			<div className="meh-section">
-				<BookingsManager />
+					{ view === 'calendar' && (
+						<div className="meh-section">
+							<CalendarView />
+						</div>
+					) }
+				</main>
 			</div>
 		</div>
 	);

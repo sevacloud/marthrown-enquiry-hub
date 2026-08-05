@@ -211,6 +211,7 @@ function meh_bootstrap() {
 	// REST API layer (the contract the React app consumes).
 	require_once MEH_INCLUDES_DIR . 'class-rest-enquiries.php';
 	require_once MEH_INCLUDES_DIR . 'class-rest-bookings.php';
+	require_once MEH_INCLUDES_DIR . 'class-export-bookings.php';
 
 	// Scheduling + UI.
 	require_once MEH_INCLUDES_DIR . 'class-cron.php';
@@ -224,6 +225,7 @@ function meh_bootstrap() {
 	\MarthrownEnquiryHub\Settings::init();
 	\MarthrownEnquiryHub\RestEnquiries::init();
 	\MarthrownEnquiryHub\RestBookings::init();
+	\MarthrownEnquiryHub\ExportBookings::init();
 	\MarthrownEnquiryHub\AdminPage::init();
 	\MarthrownEnquiryHub\FrontendBookings::init();
 }

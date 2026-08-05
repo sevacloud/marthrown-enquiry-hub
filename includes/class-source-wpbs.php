@@ -123,6 +123,81 @@ class SourceWpbs {
 	}
 
 	/**
+	 * Site-wide calendar overview for a single month.
+	 *
+	 * Returns every calendar with the pending/accepted bookings overlapping the
+	 * month. Bounded to one month and cached briefly so the (potentially large)
+	 * overview stays cheap and never blocks the rest of the UI.
+	 *
+	 * @param string $month Month as 'Y-m' (defaults to current month).
+	 * @return array{month:string,days:int,calendars:array}
+	 */
+	public static function get_calendar_month( $month = '' ) {
+		if ( ! self::available() ) {
+			return array(
+				'month'     => $month,
+				'days'      => 0,
+				'calendars' => array(),
+			);
+		}
+
+		// Normalize to YYYY-MM.
+		$ts    = $month && preg_match( '/^\d{4}-\d{2}$/', $month ) ? strtotime( $month . '-01' ) : current_time( 'timestamp' );
+		$ym    = gmdate( 'Ym', $ts );
+		$label = gmdate( 'Y-m', $ts );
+		$days  = (int) gmdate( 't', $ts );
+
+		$cache_key = 'meh_calendar_' . $ym;
+		$cached    = get_transient( $cache_key );
+		if ( false !== $cached ) {
+			return $cached;
+		}
+
+		$names     = self::calendar_names();
+		$calendars = array();
+
+		foreach ( $names as $cal_id => $name ) {
+			$bookings = wpbs_get_bookings(
+				array(
+					'calendar_id'  => $cal_id,
+					'status'       => array( 'pending', 'accepted' ),
+					// Bookings overlapping the month (matches WPBS calendar view).
+					'custom_query' => ' AND ' . $ym . ' BETWEEN EXTRACT(YEAR_MONTH FROM start_date) AND EXTRACT(YEAR_MONTH FROM end_date)',
+				)
+			);
+
+			$rows = array();
+			foreach ( (array) $bookings as $booking ) {
+				$row = self::normalize( $booking, $names );
+				unset( $row['haystack'] );
+				$rows[] = $row;
+			}
+
+			$calendars[] = array(
+				'id'       => $cal_id,
+				'name'     => $name,
+				'bookings' => $rows,
+			);
+		}
+
+		$result = array(
+			'month'     => $label,
+			'days'      => $days,
+			'calendars' => $calendars,
+		);
+
+		/**
+		 * Filter the calendar-overview cache lifetime (seconds).
+		 *
+		 * @param int $ttl Default 5 minutes.
+		 */
+		$ttl = (int) apply_filters( 'meh_calendar_cache_ttl', 5 * MINUTE_IN_SECONDS );
+		set_transient( $cache_key, $result, max( 0, $ttl ) );
+
+		return $result;
+	}
+
+	/**
 	 * Map of allowed calendar id => name (excluding filtered-out calendars).
 	 *
 	 * @return array
