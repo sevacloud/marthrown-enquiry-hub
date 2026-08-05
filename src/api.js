@@ -33,31 +33,42 @@ export function setEnquiryStatus( id, status ) {
 }
 
 /**
- * Fetch bookings for a bucket.
+ * Fetch bookings (WPBS list view), returning items, status counts and totals.
  *
- * @param {string} bucket new|upcoming|current|past.
- * @param {Object} params { page, per_page }
- * @return {Promise<{items: Array, totalPages: number, total: number}>}
+ * @param {Object} params { status, s, from, to, hide_past, page, per_page }
+ * @return {Promise<{items: Array, counts: Object, available: boolean, total: number, totalPages: number}>}
  */
-export async function getBookings( bucket, params = {} ) {
-	return fetchWithTotals( addQueryArgs( 'bookings', { bucket, ...params } ) );
+export async function getBookings( params = {} ) {
+	const { body, response } = await fetchRaw( addQueryArgs( 'bookings', params ) );
+	return {
+		items: body.items || [],
+		counts: body.counts || {},
+		available: body.available !== false,
+		total: parseInt( response.headers.get( 'X-WP-Total' ) || '0', 10 ),
+		totalPages: parseInt(
+			response.headers.get( 'X-WP-TotalPages' ) || '1',
+			10
+		),
+	};
 }
 
 /**
- * Acknowledge a booking (moves it out of "New").
+ * apiFetch returning both the parsed body (as { items, ... }) and the raw
+ * response (for pagination headers). Used by list endpoints that return an
+ * envelope object.
  *
- * @param {number} id Booking ID.
- * @return {Promise<Object>}
+ * @param {string} path Request path.
+ * @return {Promise<{body: Object, response: Response}>}
  */
-export function acknowledgeBooking( id ) {
-	return apiFetch( {
-		path: `bookings/${ id }/acknowledge`,
-		method: 'POST',
-	} );
+async function fetchRaw( path ) {
+	const response = await apiFetch( { path, parse: false } );
+	const body = await response.json();
+	return { body, response };
 }
 
 /**
- * Run an apiFetch that also reads pagination headers.
+ * Run an apiFetch that also reads pagination headers (for endpoints returning
+ * a bare array of items).
  *
  * @param {string} path Request path.
  * @return {Promise<{items: Array, totalPages: number, total: number}>}

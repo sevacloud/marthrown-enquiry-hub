@@ -158,12 +158,6 @@ function meh_activate() {
 		\MarthrownEnquiryHub\FrontendBookings::add_rewrite();
 	}
 
-	// Create the booking acknowledgment table.
-	require_once MEH_INCLUDES_DIR . 'class-source-wpbs.php';
-	if ( class_exists( '\MarthrownEnquiryHub\SourceWpbs' ) ) {
-		\MarthrownEnquiryHub\SourceWpbs::create_ack_table();
-	}
-
 	// Store the version so we can run upgrade routines later.
 	update_option( 'meh_version', MEH_VERSION );
 

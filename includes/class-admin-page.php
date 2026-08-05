@@ -101,11 +101,11 @@ class AdminPage {
 			'meh-app',
 			'mehData',
 			array(
-				'root'       => esc_url_raw( rest_url( RestEnquiries::NAMESPACE ) ),
-				'nonce'      => wp_create_nonce( 'wp_rest' ),
-				'isStaging'  => (bool) ( function_exists( 'meh_is_staging' ) && meh_is_staging() ),
-				'statuses'   => RestEnquiries::STATUSES,
-				'buckets'    => RestBookings::BUCKETS,
+				'root'      => esc_url_raw( rest_url( RestEnquiries::NAMESPACE ) ),
+				'nonce'     => wp_create_nonce( 'wp_rest' ),
+				'isStaging' => (bool) ( function_exists( 'meh_is_staging' ) && meh_is_staging() ),
+				'statuses'  => RestEnquiries::STATUSES,
+				'bookingStatuses' => SourceWpbs::STATUSES,
 			)
 		);
 	}

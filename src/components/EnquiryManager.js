@@ -15,10 +15,11 @@ const STATUS_CHOICES = [
 	{ label: __( 'Resolved', 'marthrown-enquiry-hub' ), value: 'resolved' },
 ];
 
-export default function EnquiryManager() {
+export default function EnquiryManager( { title, defaultStatus = '' } ) {
+	const heading = title || __( 'Enquiries', 'marthrown-enquiry-hub' );
 	const [ filters, setFilters ] = useState( {
 		source: '',
-		status: '',
+		status: defaultStatus,
 		from: '',
 		to: '',
 		page: 1,
@@ -50,7 +51,7 @@ export default function EnquiryManager() {
 	return (
 		<section>
 			<header className="meh-section__head">
-				<h2>{ __( 'Enquiries', 'marthrown-enquiry-hub' ) }</h2>
+				<h2>{ heading }</h2>
 				<button className="button" onClick={ refetch }>
 					{ __( 'Refresh', 'marthrown-enquiry-hub' ) }
 				</button>

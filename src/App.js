@@ -1,9 +1,9 @@
 /**
- * App — top-level layout with five polling sections.
+ * App — New Enquiries pinned at the top, then the WPBS-style Bookings Manager.
  */
 import { __ } from '@wordpress/i18n';
 import EnquiryManager from './components/EnquiryManager';
-import BookingsSection from './components/BookingsSection';
+import BookingsManager from './components/BookingsManager';
 
 export default function App() {
 	const isStaging = !! ( window.mehData && window.mehData.isStaging );
@@ -23,37 +23,17 @@ export default function App() {
 				{ __( 'Enquiry Hub', 'marthrown-enquiry-hub' ) }
 			</h1>
 
+			{ /* New enquiries first — the daily triage list. */ }
 			<div className="meh-section">
-				<EnquiryManager />
-			</div>
-
-			<div className="meh-section">
-				<BookingsSection
-					bucket="new"
-					title={ __( 'New bookings', 'marthrown-enquiry-hub' ) }
-					showAcknowledge
+				<EnquiryManager
+					title={ __( 'New enquiries', 'marthrown-enquiry-hub' ) }
+					defaultStatus="new"
 				/>
 			</div>
 
+			{ /* Bookings Manager — mirrors the WP Booking System list view. */ }
 			<div className="meh-section">
-				<BookingsSection
-					bucket="upcoming"
-					title={ __( 'Upcoming bookings', 'marthrown-enquiry-hub' ) }
-				/>
-			</div>
-
-			<div className="meh-section">
-				<BookingsSection
-					bucket="current"
-					title={ __( 'Current bookings', 'marthrown-enquiry-hub' ) }
-				/>
-			</div>
-
-			<div className="meh-section">
-				<BookingsSection
-					bucket="past"
-					title={ __( 'Past bookings (last 30 days)', 'marthrown-enquiry-hub' ) }
-				/>
+				<BookingsManager />
 			</div>
 		</div>
 	);

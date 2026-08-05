@@ -2,12 +2,14 @@
 /**
  * REST: Bookings.
  *
- * Routes under `marthrown-enquiry-hub/v1`:
- *   GET  /bookings?bucket=new|upcoming|current|past  — paginated
- *   POST /bookings/{id}/acknowledge                  — mark a booking acknowledged
+ * Mirrors the WP Booking System "Booking Manager" list view.
  *
- * Bookings are read directly from WPBS at request time (see SourceWpbs); the
- * acknowledgment state lives in this plugin's own table.
+ *   GET /marthrown-enquiry-hub/v1/bookings
+ *       ?status=all|pending|accepted|trash & s= & from= & to= & hide_past=
+ *       & orderby= & order= & page= & per_page=
+ *
+ * Bookings are read live from WPBS (see SourceWpbs). Response includes status
+ * counts (for the All/Pending/Accepted/Trash tabs) and pagination headers.
  *
  * @package MarthrownEnquiryHub
  */
@@ -24,7 +26,6 @@ if ( ! defined( 'ABSPATH' ) ) {
 class RestBookings {
 
 	const NAMESPACE = 'marthrown-enquiry-hub/v1';
-	const BUCKETS   = array( 'new', 'upcoming', 'current', 'past' );
 
 	/**
 	 * Register routes.
@@ -45,34 +46,24 @@ class RestBookings {
 				'callback'            => array( __CLASS__, 'get_bookings' ),
 				'permission_callback' => array( Auth::class, 'rest_permission' ),
 				'args'                => array(
-					'bucket'   => array(
-						'required'          => true,
+					'status'    => array(
+						'default'           => 'all',
 						'sanitize_callback' => 'sanitize_key',
-						'validate_callback' => function ( $value ) {
-							return in_array( $value, self::BUCKETS, true );
-						},
 					),
-					'page'     => array(
+					's'         => array( 'sanitize_callback' => 'sanitize_text_field' ),
+					'from'      => array( 'sanitize_callback' => 'sanitize_text_field' ),
+					'to'        => array( 'sanitize_callback' => 'sanitize_text_field' ),
+					'hide_past' => array( 'sanitize_callback' => 'rest_sanitize_boolean' ),
+					'orderby'   => array( 'sanitize_callback' => 'sanitize_key' ),
+					'order'     => array( 'sanitize_callback' => 'sanitize_key' ),
+					'page'      => array(
 						'default'           => 1,
 						'sanitize_callback' => 'absint',
 					),
-					'per_page' => array(
-						'default'           => 20,
+					'per_page'  => array(
+						'default'           => 50,
 						'sanitize_callback' => 'absint',
 					),
-				),
-			)
-		);
-
-		register_rest_route(
-			self::NAMESPACE,
-			'/bookings/(?P<id>\d+)/acknowledge',
-			array(
-				'methods'             => 'POST',
-				'callback'            => array( __CLASS__, 'acknowledge' ),
-				'permission_callback' => array( Auth::class, 'rest_permission' ),
-				'args'                => array(
-					'id' => array( 'sanitize_callback' => 'absint' ),
 				),
 			)
 		);
@@ -85,106 +76,45 @@ class RestBookings {
 	 * @return \WP_REST_Response
 	 */
 	public static function get_bookings( $request ) {
-		$bucket   = $request->get_param( 'bucket' );
-		$page     = max( 1, (int) $request->get_param( 'page' ) );
-		$per_page = min( 100, max( 1, (int) $request->get_param( 'per_page' ) ) );
+		if ( ! SourceWpbs::available() ) {
+			$response = new \WP_REST_Response(
+				array(
+					'items'     => array(),
+					'counts'    => array(),
+					'available' => false,
+				),
+				200
+			);
+			$response->header( 'X-WP-Total', 0 );
+			return $response;
+		}
 
-		$result = SourceWpbs::get_bookings( $bucket, $page, $per_page );
-
-		$items = array_map(
-			function ( $b ) use ( $bucket ) {
-				$b['bucket'] = $bucket;
-				$b['label']  = self::compute_label( $b, $bucket );
-				return $b;
-			},
-			$result['items']
+		$result = SourceWpbs::get_bookings(
+			array(
+				'status'    => $request->get_param( 'status' ),
+				'search'    => (string) $request->get_param( 's' ),
+				'from'      => (string) $request->get_param( 'from' ),
+				'to'        => (string) $request->get_param( 'to' ),
+				'hide_past' => (bool) $request->get_param( 'hide_past' ),
+				'orderby'   => (string) $request->get_param( 'orderby' ),
+				'order'     => (string) $request->get_param( 'order' ),
+				'page'      => (int) $request->get_param( 'page' ),
+				'per_page'  => (int) $request->get_param( 'per_page' ),
+			)
 		);
 
-		$response = new \WP_REST_Response( $items, 200 );
-		$response->header( 'X-WP-Total', (int) $result['total'] );
-		$response->header( 'X-WP-TotalPages', (int) ceil( $result['total'] / max( 1, $per_page ) ) );
-		return $response;
-	}
+		$per_page = min( 200, max( 1, (int) $request->get_param( 'per_page' ) ) );
 
-	/**
-	 * POST /bookings/{id}/acknowledge handler.
-	 *
-	 * @param \WP_REST_Request $request Request.
-	 * @return \WP_REST_Response
-	 */
-	public static function acknowledge( $request ) {
-		$id = absint( $request->get_param( 'id' ) );
-		SourceWpbs::acknowledge( $id, get_current_user_id() );
-
-		return new \WP_REST_Response(
+		$response = new \WP_REST_Response(
 			array(
-				'id'           => $id,
-				'acknowledged' => true,
+				'items'     => $result['items'],
+				'counts'    => $result['counts'],
+				'available' => true,
 			),
 			200
 		);
-	}
-
-	/**
-	 * Compute a human label appropriate to the bucket.
-	 *
-	 * @param array  $booking Booking.
-	 * @param string $bucket  Bucket.
-	 * @return string
-	 */
-	protected static function compute_label( $booking, $bucket ) {
-		$today = current_time( 'Y-m-d' );
-
-		if ( 'past' === $bucket && ! empty( $booking['check_out'] ) ) {
-			$days = self::day_diff( $booking['check_out'], $today );
-			return sprintf(
-				/* translators: %d: number of days */
-				_n( 'checked out %d day ago', 'checked out %d days ago', $days, 'marthrown-enquiry-hub' ),
-				$days
-			);
-		}
-
-		if ( 'current' === $bucket && ! empty( $booking['check_out'] ) ) {
-			$nights = max( 0, self::day_diff( $today, $booking['check_out'] ) );
-			return sprintf(
-				/* translators: %d: number of nights */
-				_n( '%d night remaining', '%d nights remaining', $nights, 'marthrown-enquiry-hub' ),
-				$nights
-			);
-		}
-
-		if ( in_array( $bucket, array( 'new', 'upcoming' ), true ) && ! empty( $booking['check_in'] ) ) {
-			$days = self::day_diff( $today, $booking['check_in'] );
-			if ( $days < 0 ) {
-				return sprintf(
-					/* translators: %d: number of days */
-					_n( 'check-in was %d day ago', 'check-in was %d days ago', abs( $days ), 'marthrown-enquiry-hub' ),
-					abs( $days )
-				);
-			}
-			return sprintf(
-				/* translators: %d: number of days */
-				_n( 'checks in in %d day', 'checks in in %d days', $days, 'marthrown-enquiry-hub' ),
-				$days
-			);
-		}
-
-		return '';
-	}
-
-	/**
-	 * Whole-day difference between two Y-m-d dates ($to - $from).
-	 *
-	 * @param string $from From date.
-	 * @param string $to   To date.
-	 * @return int
-	 */
-	protected static function day_diff( $from, $to ) {
-		$f = strtotime( $from . ' 00:00:00' );
-		$t = strtotime( $to . ' 00:00:00' );
-		if ( ! $f || ! $t ) {
-			return 0;
-		}
-		return (int) round( ( $t - $f ) / DAY_IN_SECONDS );
+		$response->header( 'X-WP-Total', (int) $result['total'] );
+		$response->header( 'X-WP-TotalPages', (int) ceil( $result['total'] / $per_page ) );
+		return $response;
 	}
 }

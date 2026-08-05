@@ -6,17 +6,17 @@ the source of record for enquiries.
 
 ## What it does
 
-- **Bookings** — reads the native WP Booking System (`wpbs_`) tables and shows
-  current, upcoming and past bookings on one dashboard. Booking *management*
-  stays inside the WP Booking System plugin for now.
-- **Enquiries** — collects enquiries from three sources and writes them into
+- **Bookings** — recreates the WP Booking System "Booking Manager" list view,
+  reading bookings live via WPBS's own API (native Pending/Accepted/Trash
+  statuses). Booking *management* (calendar, editing) stays inside WP Booking
+  System.
+- **Enquiries** — collects enquiries from two sources and writes them into
   FluentCRM Pro through a single shared write path:
   - Web form submissions (Kadence Forms, Fluent Forms)
   - Email (Microsoft Graph API mailbox poll)
-  - WP Booking System bookings (mirrored as activities)
-- **Respond & manage** — from the dashboard the team can create an event
-  booking from an enquiry, or remove (close/lose) cancelled or fallen-through
-  enquiries. All of this reads from and writes to FluentCRM.
+- **Respond & manage** — from the hub the team triages **new enquiries**
+  (marking them replied/resolved) and reviews bookings. Enquiry state is stored
+  in FluentCRM.
 
 ## Requirements
 
@@ -34,9 +34,9 @@ PHP is a pure REST API layer; the UI is a React app built with
 - **Enquiries** come from web forms, email (Graph), and WPBS submissions, and
   are logged into FluentCRM (source of record) via a shared writer, tagged by
   source. The React app reads/updates them through the REST API.
-- **Bookings** are NOT copied into FluentCRM. They are read live from the
-  `wpbs_` tables and bucketed by date math plus an acknowledgment table this
-  plugin owns.
+- **Bookings** are NOT copied into FluentCRM. They are read live via WPBS's
+  `wpbs_get_bookings()` API and presented in a list view that mirrors the WP
+  Booking System Booking Manager.
 
 ### REST API (`marthrown-enquiry-hub/v1`)
 
@@ -44,21 +44,25 @@ PHP is a pure REST API layer; the UI is a React app built with
 | ------------------------------------- | ---------------------------------------------- |
 | `GET /enquiries`                      | Paginated, filterable by source/status/date    |
 | `POST /enquiries/{id}/status`         | Set enquiry status (new/replied/resolved)      |
-| `GET /bookings?bucket=…`              | `new`/`upcoming`/`current`/`past`, paginated   |
-| `POST /bookings/{id}/acknowledge`     | Move a booking out of "new"                     |
+| `GET /bookings?status=…&s=&from=&to=&hide_past=` | Booking list, paginated, with status counts |
 
 Auth is via the WP REST nonce (`X-WP-Nonce`), same-origin. `permission_callback`
 allows the `administrator`, `manager`, and `operations` roles (see `Auth`).
 
-### Booking buckets
+### Bookings Manager
 
-- **new** — no row in `wp_marthrown_booking_ack` (any dates). The only
-  manually-driven bucket; sorted by check-in ascending so the most urgent are on
-  top. Nothing ages out silently — a missed check-in stays here, flagged, until
-  acknowledged.
-- **upcoming** — acknowledged, check-in in the future.
-- **current** — acknowledged, today between check-in and check-out.
-- **past** — acknowledged, check-out within the last 30 days.
+The bookings view recreates the WP Booking System "Booking Manager" list view.
+Bookings are read live via WPBS's own `wpbs_get_bookings()` API — never copied
+into FluentCRM — and use WPBS's native statuses:
+
+- Status tabs: **All / Pending / Accepted / Trash** with live counts.
+- Filters: free-text search, start/end date range, and "hide past bookings".
+- Columns: ID, Calendar, Guest, Start date, End date, Stay length, Status, and a
+  **View** link that opens the booking in WP Booking System.
+
+The calendar view and per-booking editing remain in WP Booking System; this hub
+does not duplicate them. The **New enquiries** panel sits above the Bookings
+Manager.
 
 ### File structure
 
@@ -68,19 +72,19 @@ marthrown-enquiry-hub/
 ├── includes/
 │   ├── class-auth.php               # shared role/permission checks
 │   ├── class-fluentcrm-writer.php   # shared write path (SubscriberMeta + tag)
-│   ├── class-source-wpbs.php        # WPBS read layer + acknowledgment table
+│   ├── class-source-wpbs.php        # WPBS read layer (wpbs_get_bookings)
 │   ├── class-source-email.php       # Graph API poll -> FluentCRM
 │   ├── class-source-webform.php     # Kadence/Fluent Forms -> FluentCRM
 │   ├── class-cron.php               # WP-Cron (email poll)
 │   ├── class-settings.php           # Graph credentials settings screen
 │   ├── class-rest-enquiries.php     # REST: enquiries
-│   ├── class-rest-bookings.php      # REST: bookings + acknowledge
+│   ├── class-rest-bookings.php      # REST: bookings (WPBS list view)
 │   ├── class-admin-page.php         # mounts #enquiry-hub-root, enqueues build/
 │   └── class-frontend-bookings.php  # /bookings route hosting the React app
 ├── src/                             # React source (built by wp-scripts)
 │   ├── index.js  index.scss  api.js  App.js
 │   ├── hooks/usePolling.js
-│   └── components/…
+│   └── components/         # EnquiryManager, BookingsManager, …
 ├── build/                           # compiled bundle (CI only, git-ignored)
 ├── assets/                          # frontend.css, admin.css (banner)
 ├── package.json
