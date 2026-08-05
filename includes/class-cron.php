@@ -2,9 +2,9 @@
 /**
  * WP-Cron scheduling.
  *
- * Registers two recurring events, each running every 15 minutes:
- *   - WPBS polling  -> SourceWpbs::poll()
- *   - Email polling -> SourceEmail::poll()
+ * Registers a single recurring event every 15 minutes to poll the mailbox via
+ * Microsoft Graph. Bookings are read from WPBS live (not synced), so there is
+ * no WPBS cron.
  *
  * @package MarthrownEnquiryHub
  */
@@ -20,8 +20,8 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class Cron {
 
-	const HOOK_WPBS  = 'meh_cron_wpbs_poll';
 	const HOOK_EMAIL = 'meh_cron_email_poll';
+	const HOOK_WPBS  = 'meh_cron_wpbs_poll'; // Legacy; cleared on deactivation.
 	const SCHEDULE   = 'meh_every_15_minutes';
 
 	/**
@@ -29,11 +29,14 @@ class Cron {
 	 */
 	public static function init() {
 		add_filter( 'cron_schedules', array( __CLASS__, 'register_schedules' ) );
-		add_action( self::HOOK_WPBS, array( __CLASS__, 'run_wpbs_poll' ) );
 		add_action( self::HOOK_EMAIL, array( __CLASS__, 'run_email_poll' ) );
 
-		// Self-heal: ensure events exist even if activation was missed.
-		if ( ! wp_next_scheduled( self::HOOK_WPBS ) || ! wp_next_scheduled( self::HOOK_EMAIL ) ) {
+		// Retire the legacy WPBS sync event if it lingers from an older version.
+		if ( wp_next_scheduled( self::HOOK_WPBS ) ) {
+			wp_clear_scheduled_hook( self::HOOK_WPBS );
+		}
+
+		if ( ! wp_next_scheduled( self::HOOK_EMAIL ) ) {
 			self::schedule_events();
 		}
 	}
@@ -53,14 +56,11 @@ class Cron {
 	}
 
 	/**
-	 * Schedule the recurring events. Called on activation.
+	 * Schedule the recurring event. Called on activation.
 	 */
 	public static function schedule_events() {
 		add_filter( 'cron_schedules', array( __CLASS__, 'register_schedules' ) );
 
-		if ( ! wp_next_scheduled( self::HOOK_WPBS ) ) {
-			wp_schedule_event( time() + 60, self::SCHEDULE, self::HOOK_WPBS );
-		}
 		if ( ! wp_next_scheduled( self::HOOK_EMAIL ) ) {
 			wp_schedule_event( time() + 120, self::SCHEDULE, self::HOOK_EMAIL );
 		}
@@ -70,17 +70,8 @@ class Cron {
 	 * Clear scheduled events. Called on deactivation.
 	 */
 	public static function clear_events() {
-		wp_clear_scheduled_hook( self::HOOK_WPBS );
 		wp_clear_scheduled_hook( self::HOOK_EMAIL );
-	}
-
-	/**
-	 * Cron callback: poll WPBS for new bookings.
-	 */
-	public static function run_wpbs_poll() {
-		if ( class_exists( __NAMESPACE__ . '\\SourceWpbs' ) ) {
-			SourceWpbs::poll();
-		}
+		wp_clear_scheduled_hook( self::HOOK_WPBS );
 	}
 
 	/**

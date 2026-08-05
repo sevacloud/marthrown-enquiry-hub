@@ -2,9 +2,10 @@
 /**
  * Front-end /bookings route.
  *
- * Exposes the Enquiry Hub at the site URL /bookings without needing a
- * WordPress page. The route is login-protected and restricted to the
- * administrator, manager and operations roles.
+ * Exposes the Enquiry Hub React app at the site URL /bookings without needing
+ * a WordPress page. Login-protected and restricted to the allowed roles (see
+ * Auth). Renders a self-contained, noindex page hosting the same React bundle
+ * used in wp-admin.
  *
  * @package MarthrownEnquiryHub
  */
@@ -51,42 +52,6 @@ class FrontendBookings {
 	}
 
 	/**
-	 * Roles allowed to view the bookings hub.
-	 *
-	 * @return string[]
-	 */
-	public static function allowed_roles() {
-		/**
-		 * Filter the roles allowed to access the /bookings hub.
-		 *
-		 * @param string[] $roles Role slugs.
-		 */
-		return (array) apply_filters(
-			'meh_bookings_allowed_roles',
-			array( 'administrator', 'manager', 'operations' )
-		);
-	}
-
-	/**
-	 * Whether the current user may view the hub.
-	 *
-	 * @return bool
-	 */
-	public static function current_user_can_view() {
-		if ( ! is_user_logged_in() ) {
-			return false;
-		}
-
-		// Administrators always pass, regardless of role slug naming.
-		if ( current_user_can( 'manage_options' ) ) {
-			return true;
-		}
-
-		$user = wp_get_current_user();
-		return (bool) array_intersect( self::allowed_roles(), (array) $user->roles );
-	}
-
-	/**
 	 * Intercept the /bookings request and render the hub.
 	 */
 	public static function maybe_render() {
@@ -94,16 +59,14 @@ class FrontendBookings {
 			return;
 		}
 
-		// Not logged in -> redirect to the login page, returning to /bookings
-		// after a successful sign-in.
+		// Not logged in -> redirect to the login page, returning here after.
 		if ( ! is_user_logged_in() ) {
-			$redirect_to = home_url( '/' . self::ROUTE . '/' );
-			wp_safe_redirect( wp_login_url( $redirect_to ) );
+			wp_safe_redirect( wp_login_url( home_url( '/' . self::ROUTE . '/' ) ) );
 			exit;
 		}
 
 		// Logged in but not authorised.
-		if ( ! self::current_user_can_view() ) {
+		if ( ! Auth::current_user_can_access() ) {
 			wp_die(
 				esc_html__( 'You do not have permission to access the bookings hub.', 'marthrown-enquiry-hub' ),
 				esc_html__( 'Access denied', 'marthrown-enquiry-hub' ),
@@ -116,10 +79,13 @@ class FrontendBookings {
 	}
 
 	/**
-	 * Render a self-contained page hosting the Enquiry Hub content.
+	 * Render a self-contained page hosting the React app.
 	 */
 	protected static function render_page() {
 		nocache_headers();
+
+		// Enqueue the compiled React bundle + localized data (shared path).
+		AdminPage::enqueue_app();
 
 		$is_staging = function_exists( 'meh_is_staging' ) && meh_is_staging();
 		?>
@@ -130,8 +96,8 @@ class FrontendBookings {
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<meta name="robots" content="noindex,nofollow" />
 	<title><?php esc_html_e( 'Bookings & Enquiries', 'marthrown-enquiry-hub' ); ?></title>
-	<link rel="stylesheet" href="<?php echo esc_url( MEH_PLUGIN_URL . 'assets/admin.css' ); ?>?v=<?php echo esc_attr( MEH_VERSION ); ?>" />
 	<link rel="stylesheet" href="<?php echo esc_url( MEH_PLUGIN_URL . 'assets/frontend.css' ); ?>?v=<?php echo esc_attr( MEH_VERSION ); ?>" />
+	<?php wp_print_styles(); ?>
 </head>
 <body class="meh-frontend<?php echo $is_staging ? ' meh-frontend-staging' : ''; ?>">
 	<?php if ( $is_staging ) : ?>
@@ -140,7 +106,7 @@ class FrontendBookings {
 		</div>
 	<?php endif; ?>
 
-	<div class="meh-frontend-wrap meh-wrap">
+	<div class="meh-frontend-wrap">
 		<header class="meh-frontend-header">
 			<h1><?php esc_html_e( 'Bookings & Enquiries', 'marthrown-enquiry-hub' ); ?></h1>
 			<p class="meh-frontend-user">
@@ -155,14 +121,10 @@ class FrontendBookings {
 			</p>
 		</header>
 
-		<?php
-		if ( class_exists( __NAMESPACE__ . '\\AdminDashboard' ) ) {
-			AdminDashboard::render_dashboard_content();
-		} else {
-			echo '<p>' . esc_html__( 'The Enquiry Hub is unavailable.', 'marthrown-enquiry-hub' ) . '</p>';
-		}
-		?>
+		<div id="enquiry-hub-root"></div>
 	</div>
+
+	<?php wp_print_footer_scripts(); ?>
 </body>
 </html>
 		<?php

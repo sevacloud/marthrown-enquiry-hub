@@ -1,12 +1,17 @@
 # Github Action: Deploy to host
+# Only the compiled build/ ships alongside the PHP — src/ and tooling stay off
+# the server.
 .git/
 .github/
 .vscode/
 *.log
 node_modules/
+src/
 dist/
 .DS_Store
 Thumbs.db
 .lftp_ignore
 .gitignore
 readme.md
+package.json
+package-lock.json

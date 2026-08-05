@@ -4,7 +4,7 @@
  * Plugin URI:        https://github.com/marthrown/marthrown-enquiry-hub
  * Description:        Unified hub to manage WP Booking System bookings (current, upcoming, past) and event enquiries captured via contact forms. FluentCRM Pro is the source of record for enquiries.
  * Version:           0.1.0
- * Author:            Marthrown
+ * Author:            Liamarjit @ Seva Cloud
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain:       marthrown-enquiry-hub
@@ -151,6 +151,12 @@ function meh_activate() {
 		\MarthrownEnquiryHub\FrontendBookings::add_rewrite();
 	}
 
+	// Create the booking acknowledgment table.
+	require_once MEH_INCLUDES_DIR . 'class-source-wpbs.php';
+	if ( class_exists( '\MarthrownEnquiryHub\SourceWpbs' ) ) {
+		\MarthrownEnquiryHub\SourceWpbs::create_ack_table();
+	}
+
 	// Store the version so we can run upgrade routines later.
 	update_option( 'meh_version', MEH_VERSION );
 
@@ -192,7 +198,8 @@ function meh_bootstrap() {
 		return;
 	}
 
-	// Shared write path first — the sources depend on it.
+	// Shared services.
+	require_once MEH_INCLUDES_DIR . 'class-auth.php';
 	require_once MEH_INCLUDES_DIR . 'class-fluentcrm-writer.php';
 
 	// Data sources.
@@ -200,17 +207,23 @@ function meh_bootstrap() {
 	require_once MEH_INCLUDES_DIR . 'class-source-email.php';
 	require_once MEH_INCLUDES_DIR . 'class-source-webform.php';
 
-	// Scheduling + admin UI.
+	// REST API layer (the contract the React app consumes).
+	require_once MEH_INCLUDES_DIR . 'class-rest-enquiries.php';
+	require_once MEH_INCLUDES_DIR . 'class-rest-bookings.php';
+
+	// Scheduling + UI.
 	require_once MEH_INCLUDES_DIR . 'class-cron.php';
-	require_once MEH_INCLUDES_DIR . 'class-admin-dashboard.php';
 	require_once MEH_INCLUDES_DIR . 'class-settings.php';
+	require_once MEH_INCLUDES_DIR . 'class-admin-page.php';
 	require_once MEH_INCLUDES_DIR . 'class-frontend-bookings.php';
 
 	// Boot the pieces that register hooks.
 	\MarthrownEnquiryHub\SourceWebform::init();
 	\MarthrownEnquiryHub\Cron::init();
-	\MarthrownEnquiryHub\AdminDashboard::init();
 	\MarthrownEnquiryHub\Settings::init();
+	\MarthrownEnquiryHub\RestEnquiries::init();
+	\MarthrownEnquiryHub\RestBookings::init();
+	\MarthrownEnquiryHub\AdminPage::init();
 	\MarthrownEnquiryHub\FrontendBookings::init();
 }
 add_action( 'plugins_loaded', 'meh_bootstrap' );

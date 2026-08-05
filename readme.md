@@ -25,23 +25,79 @@ the source of record for enquiries.
 - **FluentCRM Pro** (Fluent Campaign Pro) installed and active — the plugin
   disables itself with an admin notice if this dependency is missing.
 
-## File structure
+## Architecture
+
+PHP is a pure REST API layer; the UI is a React app built with
+`@wordpress/scripts` (using WordPress core's bundled `wp-element`,
+`@wordpress/components`, and `@wordpress/api-fetch` — no separate React ship).
+
+- **Enquiries** come from web forms, email (Graph), and WPBS submissions, and
+  are logged into FluentCRM (source of record) via a shared writer, tagged by
+  source. The React app reads/updates them through the REST API.
+- **Bookings** are NOT copied into FluentCRM. They are read live from the
+  `wpbs_` tables and bucketed by date math plus an acknowledgment table this
+  plugin owns.
+
+### REST API (`marthrown-enquiry-hub/v1`)
+
+| Method + route                        | Purpose                                        |
+| ------------------------------------- | ---------------------------------------------- |
+| `GET /enquiries`                      | Paginated, filterable by source/status/date    |
+| `POST /enquiries/{id}/status`         | Set enquiry status (new/replied/resolved)      |
+| `GET /bookings?bucket=…`              | `new`/`upcoming`/`current`/`past`, paginated   |
+| `POST /bookings/{id}/acknowledge`     | Move a booking out of "new"                     |
+
+Auth is via the WP REST nonce (`X-WP-Nonce`), same-origin. `permission_callback`
+allows the `administrator`, `manager`, and `operations` roles (see `Auth`).
+
+### Booking buckets
+
+- **new** — no row in `wp_marthrown_booking_ack` (any dates). The only
+  manually-driven bucket; sorted by check-in ascending so the most urgent are on
+  top. Nothing ages out silently — a missed check-in stays here, flagged, until
+  acknowledged.
+- **upcoming** — acknowledged, check-in in the future.
+- **current** — acknowledged, today between check-in and check-out.
+- **past** — acknowledged, check-out within the last 30 days.
+
+### File structure
 
 ```
 marthrown-enquiry-hub/
-├── marthrown-enquiry-hub.php     # bootstrap, dependency check, activation hooks
+├── marthrown-enquiry-hub.php        # bootstrap, dependency check, activation
 ├── includes/
-│   ├── class-source-wpbs.php     # reads wpbs_ tables, writes to FluentCRM
-│   ├── class-source-email.php    # Graph API poll + write to FluentCRM
-│   ├── class-source-webform.php  # hooks Kadence/Fluent Forms submissions
-│   ├── class-fluentcrm-writer.php# single shared write path (Activity/Note + tag)
-│   ├── class-cron.php            # WP-Cron schedules for WPBS + email pulls
-│   └── class-admin-dashboard.php # unified admin page, queries FluentCRM
-├── assets/
-│   ├── admin.css
-│   └── admin.js
+│   ├── class-auth.php               # shared role/permission checks
+│   ├── class-fluentcrm-writer.php   # shared write path (SubscriberMeta + tag)
+│   ├── class-source-wpbs.php        # WPBS read layer + acknowledgment table
+│   ├── class-source-email.php       # Graph API poll -> FluentCRM
+│   ├── class-source-webform.php     # Kadence/Fluent Forms -> FluentCRM
+│   ├── class-cron.php               # WP-Cron (email poll)
+│   ├── class-settings.php           # Graph credentials settings screen
+│   ├── class-rest-enquiries.php     # REST: enquiries
+│   ├── class-rest-bookings.php      # REST: bookings + acknowledge
+│   ├── class-admin-page.php         # mounts #enquiry-hub-root, enqueues build/
+│   └── class-frontend-bookings.php  # /bookings route hosting the React app
+├── src/                             # React source (built by wp-scripts)
+│   ├── index.js  index.scss  api.js  App.js
+│   ├── hooks/usePolling.js
+│   └── components/…
+├── build/                           # compiled bundle (CI only, git-ignored)
+├── assets/                          # frontend.css, admin.css (banner)
+├── package.json
 └── readme.md
 ```
+
+## Build
+
+```
+npm install
+npm run build      # outputs build/index.js + build/index.asset.php (+ css)
+npm start          # watch mode for development
+```
+
+CI runs `npm install && npm run build` before the SFTP deploy, and only the
+compiled `build/` ships (see `.lftp_ignore`). Commit a `package-lock.json` to
+switch CI to `npm ci` with dependency caching.
 
 ## Configuration
 
@@ -64,13 +120,12 @@ securely — never commit it to the repository.
 
 ## Scheduling
 
-Two WP-Cron events run every 15 minutes:
+One WP-Cron event runs every 15 minutes:
 
-- `meh_cron_wpbs_poll` — polls `wpbs_` tables for new bookings since the last
-  run (`meh_wpbs_last_sync`) and logs them into FluentCRM.
 - `meh_cron_email_poll` — polls the Graph mailbox folder for unread messages.
 
-Both are registered on activation and cleared on deactivation.
+Bookings are read live from WPBS on request, so there is no booking cron. The
+event is registered on activation and cleared on deactivation.
 
 ## Tags used
 

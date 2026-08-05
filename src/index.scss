@@ -1,0 +1,102 @@
+/**
+ * Enquiry Hub React app styles.
+ */
+
+.meh-app {
+	max-width: 1400px;
+
+	&__title {
+		margin: 12px 0 8px;
+	}
+}
+
+.meh-staging-banner {
+	position: sticky;
+	top: 0;
+	z-index: 9990;
+	margin: 0 0 12px;
+	padding: 6px 16px;
+	background: #d63638;
+	color: #fff;
+	font-size: 12px;
+	font-weight: 600;
+	text-align: center;
+	letter-spacing: 0.02em;
+}
+
+.meh-section {
+	margin: 0 0 28px;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 6px;
+	padding: 12px 16px 16px;
+
+	&__head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+
+		h2 {
+			margin: 4px 0;
+		}
+	}
+}
+
+.meh-count {
+	color: #646970;
+	font-weight: 400;
+}
+
+.meh-filters {
+	margin: 8px 0 12px;
+	gap: 16px;
+}
+
+.meh-date-label {
+	display: flex;
+	flex-direction: column;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	color: #1d2327;
+	gap: 4px;
+}
+
+.meh-table {
+	margin-top: 8px;
+
+	.meh-note {
+		max-width: 320px;
+		color: #50575e;
+	}
+
+	.meh-booking-label {
+		color: #50575e;
+		white-space: nowrap;
+	}
+}
+
+.meh-badge {
+	display: inline-block;
+	margin-right: 6px;
+	padding: 1px 8px;
+	border-radius: 10px;
+	font-size: 11px;
+	text-transform: capitalize;
+	background: #f0f0f1;
+	color: #1d2327;
+
+	&--new {
+		background: #fcf3d7;
+		color: #6b5411;
+	}
+	&--replied {
+		background: #d7e8fb;
+		color: #0a4b78;
+	}
+	&--resolved {
+		background: #d7f0dd;
+		color: #114a26;
+	}
+}

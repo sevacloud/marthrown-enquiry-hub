@@ -1,13 +1,16 @@
 <?php
 /**
- * Source: WP Booking System.
+ * Source: WP Booking System (read layer + acknowledgment state).
  *
- * Polls the plugin's `wpbs_` tables for new bookings/enquiries created since a
- * stored timestamp, and logs each new row into FluentCRM via
- * FluentCrmWriter::log_enquiry() with source 'wpbs'.
+ * Bookings are NOT duplicated into FluentCRM. They are read directly from the
+ * `wpbs_` tables at request time and bucketed by date math plus an
+ * acknowledgment table this plugin owns (so WPBS updates never clobber it).
  *
- * Booking *management* remains inside the native WP Booking System plugin; this
- * class only reads new rows and mirrors them as enquiries.
+ * Buckets:
+ *   - new      : no acknowledgment row (any dates) — the only manual bucket.
+ *   - upcoming : acknowledged and check-in is in the future.
+ *   - current  : acknowledged and today is between check-in and check-out.
+ *   - past     : acknowledged and check-out within the last 30 days.
  *
  * @package MarthrownEnquiryHub
  */
@@ -23,110 +26,200 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class SourceWpbs {
 
-	const SOURCE       = 'wpbs';
-	const OPT_LAST_SYNC = 'meh_wpbs_last_sync';
+	const PAST_WINDOW_DAYS = 30;
 
 	/**
-	 * Poll for new bookings since the last stored timestamp and log them.
+	 * Acknowledgment table (without prefix).
 	 *
-	 * @return int|\WP_Error Number of rows processed, or WP_Error.
+	 * @return string
 	 */
-	public static function poll() {
+	public static function ack_table() {
 		global $wpdb;
-
-		$table = self::bookings_table();
-		if ( ! self::table_exists( $table ) ) {
-			return new \WP_Error( 'meh_wpbs_missing', __( 'WP Booking System tables were not found.', 'marthrown-enquiry-hub' ) );
-		}
-
-		// Stored high-water mark. Default to the epoch so the first run picks
-		// up everything, or use a recent window if you prefer.
-		$last_sync = get_option( self::OPT_LAST_SYNC, '1970-01-01 00:00:00' );
-
-		$rows = self::get_new_bookings( $last_sync );
-		if ( empty( $rows ) ) {
-			return 0;
-		}
-
-		$processed = 0;
-		$high_water = $last_sync;
-
-		foreach ( $rows as $row ) {
-			$email = self::extract_email( $row );
-			if ( ! $email ) {
-				continue;
-			}
-
-			$name    = self::extract_name( $row );
-			$message = self::build_message( $row );
-
-			$result = FluentCrmWriter::log_enquiry( $email, $name, $message, self::SOURCE );
-			if ( ! is_wp_error( $result ) ) {
-				$processed++;
-			}
-
-			// Track the newest row timestamp we have seen.
-			if ( ! empty( $row['date_created'] ) && $row['date_created'] > $high_water ) {
-				$high_water = $row['date_created'];
-			}
-		}
-
-		// Advance the high-water mark so we never reprocess the same rows.
-		update_option( self::OPT_LAST_SYNC, $high_water, false );
-
-		return $processed;
+		return $wpdb->prefix . 'marthrown_booking_ack';
 	}
 
 	/**
-	 * Query bookings created after the given timestamp.
-	 *
-	 * NOTE: WPBS schema varies by version. This selects from wpbs_bookings and
-	 * relies on a `date_created` column. Adjust the column names to match the
-	 * installed schema if required.
-	 *
-	 * @param string $since MySQL datetime string.
-	 * @return array Rows as associative arrays.
+	 * Create the acknowledgment table. Called on activation.
 	 */
-	protected static function get_new_bookings( $since ) {
+	public static function create_ack_table() {
 		global $wpdb;
 
-		$table = self::bookings_table();
+		require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
-		$sql = "SELECT * FROM {$table} WHERE date_created > %s ORDER BY date_created ASC LIMIT 200";
+		$table           = self::ack_table();
+		$charset_collate = $wpdb->get_charset_collate();
 
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is internal, value is prepared.
-		$rows = $wpdb->get_results( $wpdb->prepare( $sql, $since ), ARRAY_A );
+		$sql = "CREATE TABLE {$table} (
+			booking_id BIGINT(20) UNSIGNED NOT NULL,
+			acknowledged_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			acknowledged_by BIGINT(20) UNSIGNED NOT NULL DEFAULT 0,
+			PRIMARY KEY (booking_id),
+			KEY acknowledged_at (acknowledged_at)
+		) {$charset_collate};";
 
-		if ( empty( $rows ) ) {
-			return array();
-		}
-
-		// Attach any booking meta (form fields) keyed by booking id.
-		foreach ( $rows as &$row ) {
-			$row['meta'] = self::get_booking_meta( (int) $row['id'] );
-		}
-		unset( $row );
-
-		return $rows;
+		dbDelta( $sql );
 	}
 
 	/**
-	 * Fetch booking meta (submitted form fields) for a booking.
+	 * Whether a booking has been acknowledged.
 	 *
 	 * @param int $booking_id Booking ID.
-	 * @return array key => value pairs.
+	 * @return bool
+	 */
+	public static function is_acknowledged( $booking_id ) {
+		global $wpdb;
+		$table = self::ack_table();
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
+		$found = $wpdb->get_var( $wpdb->prepare( "SELECT booking_id FROM {$table} WHERE booking_id = %d", absint( $booking_id ) ) );
+		return null !== $found;
+	}
+
+	/**
+	 * Record an acknowledgment.
+	 *
+	 * @param int $booking_id Booking ID.
+	 * @param int $user_id    Acknowledging user.
+	 * @return bool
+	 */
+	public static function acknowledge( $booking_id, $user_id ) {
+		global $wpdb;
+		$table = self::ack_table();
+
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery
+		$result = $wpdb->query(
+			$wpdb->prepare(
+				// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+				"INSERT INTO {$table} (booking_id, acknowledged_at, acknowledged_by) VALUES (%d, %s, %d)
+				 ON DUPLICATE KEY UPDATE acknowledged_at = VALUES(acknowledged_at), acknowledged_by = VALUES(acknowledged_by)",
+				absint( $booking_id ),
+				current_time( 'mysql' ),
+				absint( $user_id )
+			)
+		);
+
+		return false !== $result;
+	}
+
+	/**
+	 * Get bookings for a bucket.
+	 *
+	 * @param string $bucket   new|upcoming|current|past.
+	 * @param int    $page     1-based page.
+	 * @param int    $per_page Page size.
+	 * @return array{items:array,total:int}
+	 */
+	public static function get_bookings( $bucket, $page = 1, $per_page = 20 ) {
+		$all = self::read_all_bookings();
+
+		$today   = current_time( 'Y-m-d' );
+		$cutoff  = gmdate( 'Y-m-d', strtotime( $today . ' -' . self::PAST_WINDOW_DAYS . ' days' ) );
+		$matched = array();
+
+		foreach ( $all as $booking ) {
+			$acked    = self::is_acknowledged( $booking['id'] );
+			$check_in = $booking['check_in'];
+			$check_out = $booking['check_out'];
+
+			$in_bucket = false;
+			switch ( $bucket ) {
+				case 'new':
+					$in_bucket = ! $acked;
+					break;
+				case 'upcoming':
+					$in_bucket = $acked && $check_in && $check_in > $today;
+					break;
+				case 'current':
+					$in_bucket = $acked && $check_in && $check_out && $check_in <= $today && $check_out >= $today;
+					break;
+				case 'past':
+					$in_bucket = $acked && $check_out && $check_out < $today && $check_out >= $cutoff;
+					break;
+			}
+
+			if ( $in_bucket ) {
+				$booking['acknowledged'] = $acked;
+				$matched[]               = $booking;
+			}
+		}
+
+		// New: most urgent (earliest check-in) first. Others: sensible defaults.
+		usort(
+			$matched,
+			function ( $a, $b ) use ( $bucket ) {
+				if ( 'past' === $bucket ) {
+					return strcmp( (string) $b['check_out'], (string) $a['check_out'] );
+				}
+				return strcmp( (string) $a['check_in'], (string) $b['check_in'] );
+			}
+		);
+
+		$total  = count( $matched );
+		$offset = max( 0, ( $page - 1 ) * $per_page );
+		$items  = array_slice( $matched, $offset, $per_page );
+
+		return array(
+			'items' => $items,
+			'total' => $total,
+		);
+	}
+
+	/**
+	 * Read and normalize all bookings from the WPBS tables.
+	 *
+	 * NOTE: WPBS schema varies by version. Adjust column/meta names here (or via
+	 * the `meh_wpbs_bookings` filter) to match the installed schema.
+	 *
+	 * @return array List of normalized bookings.
+	 */
+	protected static function read_all_bookings() {
+		global $wpdb;
+
+		$table = $wpdb->prefix . 'wpbs_bookings';
+		if ( ! self::table_exists( $table ) ) {
+			return (array) apply_filters( 'meh_wpbs_bookings', array() );
+		}
+
+		// Pull a bounded, recent-ish set to keep this cheap on shared hosting.
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
+		$rows = $wpdb->get_results( "SELECT * FROM {$table} ORDER BY id DESC LIMIT 500", ARRAY_A );
+
+		$bookings = array();
+		foreach ( (array) $rows as $row ) {
+			$meta = self::get_booking_meta( (int) $row['id'] );
+
+			$bookings[] = array(
+				'id'        => (int) $row['id'],
+				'check_in'  => self::pick( $row, $meta, array( 'check_in', 'checkin', 'start_date', 'from_date' ) ),
+				'check_out' => self::pick( $row, $meta, array( 'check_out', 'checkout', 'end_date', 'to_date' ) ),
+				'guest'     => self::guest_name( $row, $meta ),
+				'email'     => self::pick( $row, $meta, array( 'email', 'customer_email', 'booking_email' ) ),
+				'source'    => self::pick( $row, $meta, array( 'source', 'booking_source' ) ),
+				'created'   => self::pick( $row, $meta, array( 'date_created', 'created_at', 'created' ) ),
+			);
+		}
+
+		/**
+		 * Filter the normalized WPBS bookings list.
+		 *
+		 * @param array $bookings Normalized bookings.
+		 */
+		return (array) apply_filters( 'meh_wpbs_bookings', $bookings );
+	}
+
+	/**
+	 * Fetch booking meta for a booking id.
+	 *
+	 * @param int $booking_id Booking ID.
+	 * @return array
 	 */
 	protected static function get_booking_meta( $booking_id ) {
 		global $wpdb;
-
-		$meta_table = self::booking_meta_table();
+		$meta_table = $wpdb->prefix . 'wpbs_bookings_meta';
 		if ( ! self::table_exists( $meta_table ) ) {
 			return array();
 		}
-
-		$sql = "SELECT meta_key, meta_value FROM {$meta_table} WHERE booking_id = %d";
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared -- table name is internal, value is prepared.
-		$rows = $wpdb->get_results( $wpdb->prepare( $sql, $booking_id ), ARRAY_A );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
+		$rows = $wpdb->get_results( $wpdb->prepare( "SELECT meta_key, meta_value FROM {$meta_table} WHERE booking_id = %d", $booking_id ), ARRAY_A );
 
 		$meta = array();
 		foreach ( (array) $rows as $r ) {
@@ -136,42 +229,15 @@ class SourceWpbs {
 	}
 
 	/**
-	 * Extract an email address from a booking row.
+	 * Pick the first non-empty value from a row/meta by candidate keys.
 	 *
-	 * @param array $row Booking row (with 'meta').
+	 * @param array $row        Row.
+	 * @param array $meta       Meta.
+	 * @param array $candidates Candidate keys.
 	 * @return string
 	 */
-	protected static function extract_email( array $row ) {
-		$candidates = array( 'email', 'customer_email', 'booking_email' );
+	protected static function pick( $row, $meta, array $candidates ) {
 		foreach ( $candidates as $key ) {
-			if ( ! empty( $row[ $key ] ) && is_email( $row[ $key ] ) ) {
-				return $row[ $key ];
-			}
-			if ( ! empty( $row['meta'][ $key ] ) && is_email( $row['meta'][ $key ] ) ) {
-				return $row['meta'][ $key ];
-			}
-		}
-
-		// Scan meta for anything that looks like an email.
-		foreach ( (array) ( isset( $row['meta'] ) ? $row['meta'] : array() ) as $value ) {
-			if ( is_string( $value ) && is_email( $value ) ) {
-				return $value;
-			}
-		}
-
-		return '';
-	}
-
-	/**
-	 * Extract a full name from a booking row.
-	 *
-	 * @param array $row Booking row (with 'meta').
-	 * @return string
-	 */
-	protected static function extract_name( array $row ) {
-		$meta = isset( $row['meta'] ) ? $row['meta'] : array();
-
-		foreach ( array( 'name', 'full_name', 'customer_name' ) as $key ) {
 			if ( ! empty( $row[ $key ] ) ) {
 				return (string) $row[ $key ];
 			}
@@ -179,73 +245,35 @@ class SourceWpbs {
 				return (string) $meta[ $key ];
 			}
 		}
+		return '';
+	}
 
+	/**
+	 * Derive a guest name.
+	 *
+	 * @param array $row  Row.
+	 * @param array $meta Meta.
+	 * @return string
+	 */
+	protected static function guest_name( $row, $meta ) {
+		$name = self::pick( $row, $meta, array( 'name', 'full_name', 'customer_name', 'guest' ) );
+		if ( $name ) {
+			return $name;
+		}
 		$first = isset( $meta['first_name'] ) ? $meta['first_name'] : '';
 		$last  = isset( $meta['last_name'] ) ? $meta['last_name'] : '';
 		return trim( $first . ' ' . $last );
 	}
 
 	/**
-	 * Build a human-readable enquiry message from a booking row.
+	 * Whether a table exists.
 	 *
-	 * @param array $row Booking row.
-	 * @return string
-	 */
-	protected static function build_message( array $row ) {
-		$id     = isset( $row['id'] ) ? $row['id'] : '?';
-		$status = isset( $row['status'] ) ? $row['status'] : '';
-
-		$message = sprintf(
-			/* translators: 1: booking id, 2: status */
-			__( 'WP Booking System booking #%1$s (status: %2$s).', 'marthrown-enquiry-hub' ),
-			$id,
-			$status ? $status : __( 'unknown', 'marthrown-enquiry-hub' )
-		);
-
-		// Append any free-text message field from the form meta.
-		$meta = isset( $row['meta'] ) ? $row['meta'] : array();
-		foreach ( array( 'message', 'comments', 'notes', 'enquiry' ) as $key ) {
-			if ( ! empty( $meta[ $key ] ) ) {
-				$message .= "\n\n" . wp_strip_all_tags( (string) $meta[ $key ] );
-				break;
-			}
-		}
-
-		return $message;
-	}
-
-	/*
-	 * ---------------------------------------------------------------------
-	 * Table helpers.
-	 * ---------------------------------------------------------------------
-	 */
-
-	/**
-	 * @return string Bookings table name.
-	 */
-	protected static function bookings_table() {
-		global $wpdb;
-		return $wpdb->prefix . 'wpbs_bookings';
-	}
-
-	/**
-	 * @return string Booking meta table name.
-	 */
-	protected static function booking_meta_table() {
-		global $wpdb;
-		return $wpdb->prefix . 'wpbs_bookings_meta';
-	}
-
-	/**
-	 * Check whether a table exists.
-	 *
-	 * @param string $table Fully-qualified table name.
+	 * @param string $table Table name.
 	 * @return bool
 	 */
 	protected static function table_exists( $table ) {
 		global $wpdb;
-		// phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, WordPress.DB.DirectDatabaseQuery
-		$found = $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) );
-		return $found === $table;
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery, WordPress.DB.PreparedSQL.NotPrepared
+		return $wpdb->get_var( $wpdb->prepare( 'SHOW TABLES LIKE %s', $table ) ) === $table;
 	}
 }
