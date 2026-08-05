@@ -80,6 +80,27 @@ class RestBookings {
 
 		register_rest_route(
 			self::NAMESPACE,
+			'/bookings/(?P<id>\d+)/convert',
+			array(
+				'methods'             => 'POST',
+				'callback'            => array( __CLASS__, 'convert_booking' ),
+				'permission_callback' => array( Auth::class, 'rest_permission' ),
+				'args'                => array(
+					'id'                 => array( 'sanitize_callback' => 'absint' ),
+					'target_calendar_id' => array(
+						'required'          => true,
+						'sanitize_callback' => 'absint',
+					),
+					'status'             => array(
+						'default'           => 'pending',
+						'sanitize_callback' => 'sanitize_key',
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::NAMESPACE,
 			'/bookings/calendar',
 			array(
 				'methods'             => 'GET',
@@ -95,6 +116,26 @@ class RestBookings {
 				),
 			)
 		);
+	}
+
+	/**
+	 * POST /bookings/{id}/convert handler.
+	 *
+	 * @param \WP_REST_Request $request Request.
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public static function convert_booking( $request ) {
+		$result = SourceWpbs::convert_booking(
+			(int) $request->get_param( 'id' ),
+			(int) $request->get_param( 'target_calendar_id' ),
+			(string) $request->get_param( 'status' )
+		);
+
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		return new \WP_REST_Response( $result, 201 );
 	}
 
 	/**

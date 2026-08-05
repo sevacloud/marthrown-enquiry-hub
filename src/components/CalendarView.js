@@ -154,6 +154,7 @@ export default function CalendarView() {
 					) }
 					{ calendars.map( ( cal ) => {
 						const lanes = assignLanes( cal.bookings, month, days );
+						const placeholders = cal.placeholders || [];
 						return (
 							<div key={ cal.id } className="meh-calendar-row">
 								<div className="meh-calendar-rowhead">
@@ -180,9 +181,46 @@ export default function CalendarView() {
 											)
 										) }
 									</div>
-									{ lanes.length === 0 && (
-										<div className="meh-calendar-empty">—</div>
-									) }
+									{ lanes.length === 0 &&
+										placeholders.length === 0 && (
+											<div className="meh-calendar-empty">
+												—
+											</div>
+										) }
+									{ placeholders.map( ( p, pi ) => (
+										<div
+											key={ `ph-${ pi }` }
+											className="meh-calendar-lane"
+											style={ {
+												gridTemplateColumns: `repeat(${ days }, 1fr)`,
+											} }
+										>
+											<span
+												className="meh-calendar-booking meh-calendar-placeholder"
+												style={ {
+													gridColumn: `${ p.start_day } / ${
+														p.end_day + 1
+													}`,
+													...( p.color
+														? {
+																borderColor:
+																	p.color,
+																color: p.color,
+														  }
+														: {} ),
+												} }
+												title={ `${ __(
+													'Placeholder',
+													'marthrown-enquiry-hub'
+												) }: ${ p.title }${
+													p.note ? ' — ' + p.note : ''
+												}` }
+											>
+												▦ { p.title }
+												{ p.note ? ` — ${ p.note }` : '' }
+											</span>
+										</div>
+									) ) }
 									{ lanes.map( ( lane, li ) => (
 										<div
 											key={ li }

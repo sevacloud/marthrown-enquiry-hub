@@ -45,7 +45,9 @@ PHP is a pure REST API layer; the UI is a React app built with
 | `GET /enquiries`                      | Paginated, filterable by source/status/date    |
 | `POST /enquiries/{id}/status`         | Set enquiry status (new/replied/resolved)      |
 | `GET /bookings?status=…&s=&from=&to=&hide_past=` | Booking list, paginated, with status counts |
-| `GET /bookings/calendar?month=YYYY-MM` | Site-wide month overview (cached), all calendars |
+| `GET /bookings/calendar?month=YYYY-MM` | Site-wide month overview (cached): bookings + placeholders |
+| `POST /bookings/{id}/convert`         | Convert an enquiry booking into a real booking |
+| `GET /calendars`                      | Calendar list for the pickers |
 
 CSV export is a separate nonce-protected `admin-post.php` action
 (`meh_export_bookings`) that streams the file, honouring the current filters.
@@ -68,14 +70,19 @@ into FluentCRM — and use WPBS's native statuses:
 - **Add booking** — pick a calendar and open WP Booking System's native
   add-booking screen.
 - **Convert to…** — bookings on the configured *Event Enquiry* calendar (where
-  website enquiries land) get a Convert control that opens the add-booking
-  screen on a chosen target calendar (e.g. Top Site / Full Site), pre-filling the
-  enquiry's dates.
+  website enquiries land) get a Convert control. Choosing a target calendar
+  (e.g. Top Site / Full Site) **programmatically creates a real booking** on it
+  (`wpbs_insert_booking`), copying the enquiry's dates and form fields, and
+  blocks those dates via the target calendar's "booked" legend
+  (`wpbs_insert_event`). New bookings are created as `pending`; both bookings are
+  cross-referenced (`meh_converted_from` / `meh_converted_to`). WPBS side effects
+  (emails, payments, pricing, inventory) are intentionally not triggered.
 
-Booking creation and per-booking editing happen in WP Booking System (the
-**View** / **Add booking** / **Convert** links open its screens). A site-wide
-**Calendar** overview is available from the side nav, with bars coloured by each
-calendar's WPBS legend colour.
+Per-booking editing happens in WP Booking System (the **View** link); **Add
+booking** opens its native add-booking screen. A site-wide **Calendar** overview
+is on the side nav, with booking bars coloured by each calendar's WPBS legend
+colour, and **placeholders** (manual, non-booking day markers) drawn as dashed
+striped bars labelled with their legend item.
 
 The top panel is **New email enquiries** — enquiries with `source-email`.
 Website enquiries are not FluentCRM enquiries: they arrive as WPBS bookings on
@@ -99,8 +106,14 @@ datasets it:
 - loads **lazily** — only when the Calendar tab is opened, so it never blocks
   the Overview;
 - fetches **one month at a time** via `GET /bookings/calendar`;
-- is **cached server-side** for a few minutes (filter `meh_calendar_cache_ttl`);
+- is **cached server-side** for a few minutes (filter `meh_calendar_cache_ttl`,
+  invalidated when a conversion writes into a month);
 - has **no background polling** (manual Refresh + month navigation instead).
+
+**Placeholders** — manual day markers (WPBS *events* with `booking_id = 0` and a
+non-default legend item, e.g. blocked days set by hand) are fetched per calendar,
+grouped into consecutive-day spans, and drawn as dashed striped bars so they're
+clearly distinct from real bookings.
 
 Layout is a side nav: **Overview** (New enquiries + Bookings Manager) and
 **Calendar**.

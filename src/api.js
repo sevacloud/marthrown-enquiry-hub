@@ -53,6 +53,22 @@ export async function getBookings( params = {} ) {
 }
 
 /**
+ * Convert an enquiry booking into a real booking on a target calendar.
+ *
+ * @param {number} id               Source booking id.
+ * @param {number} targetCalendarId Target calendar id.
+ * @param {string} status           pending|accepted.
+ * @return {Promise<{id: number, edit_url: string}>}
+ */
+export function convertBooking( id, targetCalendarId, status = 'pending' ) {
+	return apiFetch( {
+		path: `bookings/${ id }/convert`,
+		method: 'POST',
+		data: { target_calendar_id: targetCalendarId, status },
+	} );
+}
+
+/**
  * List calendars (for the new-booking and convert pickers).
  *
  * @return {Promise<{available: boolean, enquiry_id: number, calendars: Array}>}

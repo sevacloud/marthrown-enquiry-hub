@@ -346,6 +346,20 @@
 	}
 }
 
+/* Placeholders: manual, non-booking day markers — visually distinct. */
+.meh-calendar-placeholder {
+	background: repeating-linear-gradient(
+		45deg,
+		rgba( 0, 0, 0, 0.04 ),
+		rgba( 0, 0, 0, 0.04 ) 4px,
+		transparent 4px,
+		transparent 8px
+	);
+	border: 1px dashed #8c8f94;
+	color: #50575e;
+	font-style: italic;
+}
+
 /* --- New booking + convert controls --- */
 
 .meh-header-actions {

@@ -11,57 +11,53 @@ import { __ } from '@wordpress/i18n';
 import { useState, useEffect, useCallback } from '@wordpress/element';
 import { Spinner, Notice, CheckboxControl } from '@wordpress/components';
 import usePolling from '../hooks/usePolling';
-import { getBookings, getCalendars, bookingsExportUrl } from '../api';
+import {
+	getBookings,
+	getCalendars,
+	convertBooking,
+	bookingsExportUrl,
+} from '../api';
 
 /**
- * Append query args to a URL string.
- *
- * @param {string} url  Base URL (may already have a query string).
- * @param {Object} args Extra params.
- * @return {string}
+ * Per-row "Convert" control: creates a real booking on the chosen target
+ * calendar (copying the enquiry's dates + fields and blocking availability),
+ * then offers to open the new booking in WP Booking System.
  */
-function withParams( url, args ) {
-	const u = new URL( url, window.location.origin );
-	Object.entries( args ).forEach( ( [ k, v ] ) => {
-		if ( v ) {
-			u.searchParams.set( k, v );
-		}
-	} );
-	return u.toString();
-}
+function ConvertControl( { booking, targets, onConverted } ) {
+	const [ busy, setBusy ] = useState( false );
 
-/**
- * Per-row "Convert" control: opens WP Booking System's add-booking screen on a
- * chosen target calendar, pre-filling the enquiry's dates.
- */
-function ConvertControl( { booking, targets } ) {
 	if ( ! targets.length ) {
 		return null;
 	}
+
+	const onSelect = async ( e ) => {
+		const targetId = e.target.value;
+		e.target.value = '';
+		if ( ! targetId || busy ) {
+			return;
+		}
+		setBusy( true );
+		try {
+			const result = await convertBooking( booking.id, Number( targetId ) );
+			onConverted( result );
+		} catch ( err ) {
+			onConverted( null, err );
+		} finally {
+			setBusy( false );
+		}
+	};
+
 	return (
 		<select
 			className="meh-convert-select"
 			defaultValue=""
-			onChange={ ( e ) => {
-				const target = targets.find(
-					( t ) => String( t.id ) === e.target.value
-				);
-				if ( target ) {
-					window.open(
-						withParams( target.add_url, {
-							start_date: booking.start_date,
-							end_date: booking.end_date,
-							meh_from_enquiry: booking.id,
-						} ),
-						'_blank',
-						'noopener'
-					);
-				}
-				e.target.value = '';
-			} }
+			disabled={ busy }
+			onChange={ onSelect }
 		>
 			<option value="">
-				{ __( 'Convert to…', 'marthrown-enquiry-hub' ) }
+				{ busy
+					? __( 'Converting…', 'marthrown-enquiry-hub' )
+					: __( 'Convert to…', 'marthrown-enquiry-hub' ) }
 			</option>
 			{ targets.map( ( t ) => (
 				<option key={ t.id } value={ t.id }>
@@ -101,6 +97,7 @@ export default function BookingsManager() {
 	const [ hidePast, setHidePast ] = useState( false );
 	const [ calendars, setCalendars ] = useState( [] );
 	const [ newBookingCal, setNewBookingCal ] = useState( '' );
+	const [ convertMsg, setConvertMsg ] = useState( null );
 
 	// Load calendars once for the new-booking + convert pickers.
 	useEffect( () => {
@@ -111,6 +108,28 @@ export default function BookingsManager() {
 
 	// Convert targets = every calendar that isn't the Event Enquiry one.
 	const convertTargets = calendars.filter( ( c ) => ! c.is_enquiry );
+
+	const onConverted = ( result, err ) => {
+		if ( err || ! result ) {
+			setConvertMsg( {
+				type: 'error',
+				text: __(
+					'Could not convert the enquiry.',
+					'marthrown-enquiry-hub'
+				),
+			} );
+			return;
+		}
+		setConvertMsg( {
+			type: 'success',
+			text: __(
+				'Booking created from enquiry.',
+				'marthrown-enquiry-hub'
+			),
+			url: result.edit_url,
+		} );
+		refetch();
+	};
 
 	const fetcher = useCallback(
 		() =>
@@ -209,6 +228,24 @@ export default function BookingsManager() {
 			{ error && (
 				<Notice status="error" isDismissible={ false }>
 					{ __( 'Could not load bookings.', 'marthrown-enquiry-hub' ) }
+				</Notice>
+			) }
+
+			{ convertMsg && (
+				<Notice
+					status={ convertMsg.type }
+					onRemove={ () => setConvertMsg( null ) }
+				>
+					{ convertMsg.text }{ ' ' }
+					{ convertMsg.url && (
+						<a
+							href={ convertMsg.url }
+							target="_blank"
+							rel="noopener noreferrer"
+						>
+							{ __( 'Open booking', 'marthrown-enquiry-hub' ) }
+						</a>
+					) }
 				</Notice>
 			) }
 
@@ -334,6 +371,7 @@ export default function BookingsManager() {
 									<ConvertControl
 										booking={ b }
 										targets={ convertTargets }
+										onConverted={ onConverted }
 									/>
 								) }
 							</td>
