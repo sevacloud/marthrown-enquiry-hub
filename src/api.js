@@ -53,6 +53,15 @@ export async function getBookings( params = {} ) {
 }
 
 /**
+ * List calendars (for the new-booking and convert pickers).
+ *
+ * @return {Promise<{available: boolean, enquiry_id: number, calendars: Array}>}
+ */
+export function getCalendars() {
+	return apiFetch( { path: 'calendars' } );
+}
+
+/**
  * Fetch the site-wide calendar overview for a month.
  *
  * @param {string} month 'YYYY-MM' (empty = current month).

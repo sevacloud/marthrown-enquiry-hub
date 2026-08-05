@@ -70,6 +70,16 @@ class RestBookings {
 
 		register_rest_route(
 			self::NAMESPACE,
+			'/calendars',
+			array(
+				'methods'             => 'GET',
+				'callback'            => array( __CLASS__, 'get_calendars' ),
+				'permission_callback' => array( Auth::class, 'rest_permission' ),
+			)
+		);
+
+		register_rest_route(
+			self::NAMESPACE,
 			'/bookings/calendar',
 			array(
 				'methods'             => 'GET',
@@ -84,6 +94,22 @@ class RestBookings {
 					),
 				),
 			)
+		);
+	}
+
+	/**
+	 * GET /calendars handler — list calendars for pickers.
+	 *
+	 * @return \WP_REST_Response
+	 */
+	public static function get_calendars() {
+		return new \WP_REST_Response(
+			array(
+				'available'  => SourceWpbs::available(),
+				'enquiry_id' => SourceWpbs::enquiry_calendar_id(),
+				'calendars'  => SourceWpbs::list_calendars(),
+			),
+			200
 		);
 	}
 

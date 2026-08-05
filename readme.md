@@ -65,9 +65,30 @@ into FluentCRM — and use WPBS's native statuses:
   **View** link that opens the booking in WP Booking System.
 
 - **Export CSV** streams the currently-filtered bookings.
+- **Add booking** — pick a calendar and open WP Booking System's native
+  add-booking screen.
+- **Convert to…** — bookings on the configured *Event Enquiry* calendar (where
+  website enquiries land) get a Convert control that opens the add-booking
+  screen on a chosen target calendar (e.g. Top Site / Full Site), pre-filling the
+  enquiry's dates.
 
-Per-booking editing remains in WP Booking System (the **View** link). A
-site-wide **Calendar** overview is available from the side nav.
+Booking creation and per-booking editing happen in WP Booking System (the
+**View** / **Add booking** / **Convert** links open its screens). A site-wide
+**Calendar** overview is available from the side nav, with bars coloured by each
+calendar's WPBS legend colour.
+
+The top panel is **New email enquiries** — enquiries with `source-email`.
+Website enquiries are not FluentCRM enquiries: they arrive as WPBS bookings on
+the Event Enquiry calendar and appear in the Bookings Manager / Calendar.
+
+### Bookings settings
+
+On **Enquiry Hub → Settings → Bookings**:
+
+- **Guest name field** / **Guest email field** — the booking-form field label
+  (or field ID) to read the guest name/email from (falls back to heuristics).
+- **Event Enquiry calendar** — identifies which calendar holds website
+  enquiries, enabling the Convert action on its bookings.
 
 ### Calendar overview
 

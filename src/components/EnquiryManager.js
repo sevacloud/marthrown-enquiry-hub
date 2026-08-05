@@ -15,10 +15,10 @@ const STATUS_CHOICES = [
 	{ label: __( 'Resolved', 'marthrown-enquiry-hub' ), value: 'resolved' },
 ];
 
-export default function EnquiryManager( { title, defaultStatus = '' } ) {
+export default function EnquiryManager( { title, defaultStatus = '', defaultSource = '' } ) {
 	const heading = title || __( 'Enquiries', 'marthrown-enquiry-hub' );
 	const [ filters, setFilters ] = useState( {
-		source: '',
+		source: defaultSource,
 		status: defaultStatus,
 		from: '',
 		to: '',

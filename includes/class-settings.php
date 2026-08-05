@@ -143,6 +143,118 @@ class Settings {
 				)
 			);
 		}
+
+		self::register_bookings_settings();
+	}
+
+	/**
+	 * Register the Bookings settings section (guest fields + enquiry calendar).
+	 */
+	public static function register_bookings_settings() {
+		register_setting(
+			self::OPTION_GROUP,
+			'meh_guest_name_field',
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
+				'default'           => '',
+			)
+		);
+		register_setting(
+			self::OPTION_GROUP,
+			'meh_guest_email_field',
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
+				'default'           => '',
+			)
+		);
+		register_setting(
+			self::OPTION_GROUP,
+			'meh_event_enquiry_calendar',
+			array(
+				'type'              => 'integer',
+				'sanitize_callback' => 'absint',
+				'default'           => 0,
+			)
+		);
+
+		add_settings_section(
+			'meh_bookings_section',
+			__( 'Bookings', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_bookings_section_intro' ),
+			self::MENU_SLUG
+		);
+
+		add_settings_field(
+			'meh_guest_name_field',
+			__( 'Guest name field', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_text_field' ),
+			self::MENU_SLUG,
+			'meh_bookings_section',
+			array(
+				'label_for'   => 'meh_guest_name_field',
+				'description' => __( 'Booking form field label (or field ID) holding the guest name.', 'marthrown-enquiry-hub' ),
+			)
+		);
+		add_settings_field(
+			'meh_guest_email_field',
+			__( 'Guest email field', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_text_field' ),
+			self::MENU_SLUG,
+			'meh_bookings_section',
+			array(
+				'label_for'   => 'meh_guest_email_field',
+				'description' => __( 'Booking form field label (or field ID) holding the guest email.', 'marthrown-enquiry-hub' ),
+			)
+		);
+		add_settings_field(
+			'meh_event_enquiry_calendar',
+			__( 'Event Enquiry calendar', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_calendar_select' ),
+			self::MENU_SLUG,
+			'meh_bookings_section',
+			array(
+				'label_for'   => 'meh_event_enquiry_calendar',
+				'description' => __( 'Website enquiries arrive as bookings on this calendar. Bookings here get a "Convert to booking" action.', 'marthrown-enquiry-hub' ),
+			)
+		);
+	}
+
+	/**
+	 * Bookings section intro.
+	 */
+	public static function render_bookings_section_intro() {
+		echo '<p>' . esc_html__( 'Map WP Booking System form fields to the guest name/email shown in the hub, and identify the Event Enquiry calendar.', 'marthrown-enquiry-hub' ) . '</p>';
+	}
+
+	/**
+	 * Render a calendar <select> bound to an option.
+	 *
+	 * @param array $args Field args (label_for, description).
+	 */
+	public static function render_calendar_select( $args ) {
+		$option   = $args['label_for'];
+		$value    = (int) get_option( $option, 0 );
+		$calendars = function_exists( 'wpbs_get_calendars' ) ? wpbs_get_calendars() : array();
+
+		echo '<select id="' . esc_attr( $option ) . '" name="' . esc_attr( $option ) . '">';
+		echo '<option value="0">' . esc_html__( '— None —', 'marthrown-enquiry-hub' ) . '</option>';
+		foreach ( $calendars as $calendar ) {
+			$id   = (int) $calendar->get( 'id' );
+			$name = method_exists( $calendar, 'get_name' ) ? $calendar->get_name() : $calendar->get( 'name' );
+			printf(
+				'<option value="%1$d" %2$s>%3$s</option>',
+				$id,
+				selected( $value, $id, false ),
+				esc_html( $name )
+			);
+		}
+		echo '</select>';
+
+		if ( ! empty( $args['description'] ) ) {
+			printf( '<p class="description">%s</p>', esc_html( $args['description'] ) );
+		}
 	}
 
 	/*

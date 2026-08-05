@@ -8,10 +8,69 @@
  * plugin; the "View" link opens the booking there.
  */
 import { __ } from '@wordpress/i18n';
-import { useState, useCallback } from '@wordpress/element';
+import { useState, useEffect, useCallback } from '@wordpress/element';
 import { Spinner, Notice, CheckboxControl } from '@wordpress/components';
 import usePolling from '../hooks/usePolling';
-import { getBookings, bookingsExportUrl } from '../api';
+import { getBookings, getCalendars, bookingsExportUrl } from '../api';
+
+/**
+ * Append query args to a URL string.
+ *
+ * @param {string} url  Base URL (may already have a query string).
+ * @param {Object} args Extra params.
+ * @return {string}
+ */
+function withParams( url, args ) {
+	const u = new URL( url, window.location.origin );
+	Object.entries( args ).forEach( ( [ k, v ] ) => {
+		if ( v ) {
+			u.searchParams.set( k, v );
+		}
+	} );
+	return u.toString();
+}
+
+/**
+ * Per-row "Convert" control: opens WP Booking System's add-booking screen on a
+ * chosen target calendar, pre-filling the enquiry's dates.
+ */
+function ConvertControl( { booking, targets } ) {
+	if ( ! targets.length ) {
+		return null;
+	}
+	return (
+		<select
+			className="meh-convert-select"
+			defaultValue=""
+			onChange={ ( e ) => {
+				const target = targets.find(
+					( t ) => String( t.id ) === e.target.value
+				);
+				if ( target ) {
+					window.open(
+						withParams( target.add_url, {
+							start_date: booking.start_date,
+							end_date: booking.end_date,
+							meh_from_enquiry: booking.id,
+						} ),
+						'_blank',
+						'noopener'
+					);
+				}
+				e.target.value = '';
+			} }
+		>
+			<option value="">
+				{ __( 'Convert to…', 'marthrown-enquiry-hub' ) }
+			</option>
+			{ targets.map( ( t ) => (
+				<option key={ t.id } value={ t.id }>
+					{ t.name }
+				</option>
+			) ) }
+		</select>
+	);
+}
 
 const TABS = [
 	{ key: 'all', label: __( 'All', 'marthrown-enquiry-hub' ) },
@@ -40,6 +99,18 @@ export default function BookingsManager() {
 	const [ from, setFrom ] = useState( '' );
 	const [ to, setTo ] = useState( '' );
 	const [ hidePast, setHidePast ] = useState( false );
+	const [ calendars, setCalendars ] = useState( [] );
+	const [ newBookingCal, setNewBookingCal ] = useState( '' );
+
+	// Load calendars once for the new-booking + convert pickers.
+	useEffect( () => {
+		getCalendars()
+			.then( ( r ) => setCalendars( r.calendars || [] ) )
+			.catch( () => setCalendars( [] ) );
+	}, [] );
+
+	// Convert targets = every calendar that isn't the Event Enquiry one.
+	const convertTargets = calendars.filter( ( c ) => ! c.is_enquiry );
 
 	const fetcher = useCallback(
 		() =>
@@ -72,9 +143,58 @@ export default function BookingsManager() {
 				<span className="wpbs-page-heading">
 					{ __( 'Bookings Manager', 'marthrown-enquiry-hub' ) }
 				</span>
-				<button className="button" onClick={ refetch }>
-					{ __( 'Refresh', 'marthrown-enquiry-hub' ) }
-				</button>
+				<div className="meh-header-actions">
+					{ calendars.length > 0 && (
+						<span className="meh-newbooking">
+							<select
+								value={ newBookingCal }
+								onChange={ ( e ) =>
+									setNewBookingCal( e.target.value )
+								}
+							>
+								<option value="">
+									{ __(
+										'Calendar…',
+										'marthrown-enquiry-hub'
+									) }
+								</option>
+								{ calendars.map( ( c ) => (
+									<option key={ c.id } value={ c.id }>
+										{ c.name }
+									</option>
+								) ) }
+							</select>
+							<a
+								className="button button-primary"
+								href={
+									(
+										calendars.find(
+											( c ) =>
+												String( c.id ) ===
+												newBookingCal
+										) || {}
+									).add_url || '#'
+								}
+								target="_blank"
+								rel="noopener noreferrer"
+								aria-disabled={ ! newBookingCal }
+								onClick={ ( e ) => {
+									if ( ! newBookingCal ) {
+										e.preventDefault();
+									}
+								} }
+							>
+								{ __(
+									'Add booking',
+									'marthrown-enquiry-hub'
+								) }
+							</a>
+						</span>
+					) }
+					<button className="button" onClick={ refetch }>
+						{ __( 'Refresh', 'marthrown-enquiry-hub' ) }
+					</button>
+				</div>
 			</div>
 
 			{ ! available && (
@@ -201,7 +321,7 @@ export default function BookingsManager() {
 							<td>
 								<StatusPill status={ b.status } />
 							</td>
-							<td>
+							<td className="meh-row-actions">
 								<a
 									className="button"
 									href={ b.view_url }
@@ -210,6 +330,12 @@ export default function BookingsManager() {
 								>
 									{ __( 'View', 'marthrown-enquiry-hub' ) }
 								</a>
+								{ b.is_enquiry && (
+									<ConvertControl
+										booking={ b }
+										targets={ convertTargets }
+									/>
+								) }
 							</td>
 						</tr>
 					) ) }

@@ -95,7 +95,9 @@ class SourceWpbs {
 		$counts     = self::empty_counts();
 		$today      = current_time( 'Y-m-d' );
 
-		$filters = compact( 'status', 'search', 'from', 'to', 'hide_past', 'today' );
+		$filters    = compact( 'status', 'search', 'from', 'to', 'hide_past', 'today' );
+		$colors     = self::calendar_colors( $calendar_ids );
+		$enquiry_id = self::enquiry_calendar_id();
 
 		foreach ( (array) $raw as $booking ) {
 			$row = self::normalize( $booking, $names );
@@ -106,6 +108,9 @@ class SourceWpbs {
 			if ( ! self::passes_filters( $row, $filters ) ) {
 				continue;
 			}
+
+			$row['color']      = $colors[ $row['calendar_id'] ] ?? '';
+			$row['is_enquiry'] = ( $row['calendar_id'] === $enquiry_id );
 
 			unset( $row['haystack'] );
 			$normalized[] = $row;
@@ -153,8 +158,10 @@ class SourceWpbs {
 			return $cached;
 		}
 
-		$names     = self::calendar_names();
-		$calendars = array();
+		$names      = self::calendar_names();
+		$colors     = self::calendar_colors( array_keys( $names ) );
+		$enquiry_id = self::enquiry_calendar_id();
+		$calendars  = array();
 
 		foreach ( $names as $cal_id => $name ) {
 			$bookings = wpbs_get_bookings(
@@ -170,13 +177,16 @@ class SourceWpbs {
 			foreach ( (array) $bookings as $booking ) {
 				$row = self::normalize( $booking, $names );
 				unset( $row['haystack'] );
-				$rows[] = $row;
+				$row['color'] = $colors[ $cal_id ] ?? '';
+				$rows[]       = $row;
 			}
 
 			$calendars[] = array(
-				'id'       => $cal_id,
-				'name'     => $name,
-				'bookings' => $rows,
+				'id'         => $cal_id,
+				'name'       => $name,
+				'color'      => $colors[ $cal_id ] ?? '',
+				'is_enquiry' => ( $cal_id === $enquiry_id ),
+				'bookings'   => $rows,
 			);
 		}
 
@@ -288,33 +298,31 @@ class SourceWpbs {
 	}
 
 	/**
-	 * Best-effort guest name/email from booking form fields.
+	 * Guest name/email from booking form fields.
+	 *
+	 * Prefers the field label/id configured on the settings screen
+	 * (meh_guest_name_field / meh_guest_email_field); falls back to heuristics.
 	 *
 	 * @param array $fields Booking fields.
 	 * @return array{name:string,email:string}
 	 */
 	protected static function guest_from_fields( $fields ) {
+		$cfg   = self::guest_field_config();
 		$name  = '';
 		$email = '';
 
 		foreach ( $fields as $field ) {
-			$label = strtolower( (string) ( $field['label'] ?? '' ) );
-			$type  = strtolower( (string) ( $field['type'] ?? '' ) );
-			$value = $field['user_value'] ?? '';
-			if ( is_array( $value ) ) {
-				$value = implode( ' ', $value );
-			}
-			$value = trim( (string) $value );
+			$value = self::field_value( $field );
 			if ( '' === $value ) {
 				continue;
 			}
+			$label = strtolower( (string) ( $field['label'] ?? '' ) );
+			$id    = (string) ( $field['id'] ?? '' );
 
-			if ( ! $email && ( 'email' === $type || false !== strpos( $label, 'email' ) || is_email( $value ) ) ) {
-				$email = $value;
-				continue;
-			}
-			if ( ! $name && ( false !== strpos( $label, 'name' ) ) ) {
+			if ( '' === $name && self::field_is( 'name', $field, $cfg, $label, $id, $value ) ) {
 				$name = $value;
+			} elseif ( '' === $email && self::field_is( 'email', $field, $cfg, $label, $id, $value ) ) {
+				$email = $value;
 			}
 		}
 
@@ -322,6 +330,128 @@ class SourceWpbs {
 			'name'  => $name,
 			'email' => $email,
 		);
+	}
+
+	/**
+	 * Whether a field represents the given target (name|email).
+	 *
+	 * @param string $target 'name' or 'email'.
+	 * @param array  $field  Field.
+	 * @param array  $cfg    Configured mappings.
+	 * @param string $label  Lower-cased label.
+	 * @param string $id     Field id.
+	 * @param string $value  Field value.
+	 * @return bool
+	 */
+	protected static function field_is( $target, $field, $cfg, $label, $id, $value ) {
+		// Configured mapping wins.
+		if ( '' !== $cfg[ $target ] ) {
+			return $label === $cfg[ $target ] || $id === $cfg[ $target ];
+		}
+		// Heuristic fallback.
+		if ( 'email' === $target ) {
+			$type = strtolower( (string) ( $field['type'] ?? '' ) );
+			return 'email' === $type || false !== strpos( $label, 'email' ) || is_email( $value );
+		}
+		return false !== strpos( $label, 'name' );
+	}
+
+	/**
+	 * Normalize a field's user value to a trimmed string.
+	 *
+	 * @param array $field Field.
+	 * @return string
+	 */
+	protected static function field_value( $field ) {
+		$value = $field['user_value'] ?? '';
+		if ( is_array( $value ) ) {
+			$value = implode( ' ', $value );
+		}
+		return trim( (string) $value );
+	}
+
+	/**
+	 * Configured guest field label/id mappings (lower-cased).
+	 *
+	 * @return array{name:string,email:string}
+	 */
+	protected static function guest_field_config() {
+		static $cfg = null;
+		if ( null === $cfg ) {
+			$cfg = array(
+				'name'  => strtolower( trim( (string) get_option( 'meh_guest_name_field', '' ) ) ),
+				'email' => strtolower( trim( (string) get_option( 'meh_guest_email_field', '' ) ) ),
+			);
+		}
+		return $cfg;
+	}
+
+	/**
+	 * Default legend colour per calendar (WPBS legend item colour).
+	 *
+	 * @param array $calendar_ids Calendar IDs.
+	 * @return array id => hex colour string.
+	 */
+	protected static function calendar_colors( $calendar_ids ) {
+		$colors = array();
+		if ( ! function_exists( 'wpbs_get_legend_items' ) ) {
+			return $colors;
+		}
+		foreach ( $calendar_ids as $id ) {
+			$items = wpbs_get_legend_items( array( 'calendar_id' => $id ) );
+			foreach ( (array) $items as $item ) {
+				if ( 1 !== (int) $item->get( 'is_default' ) ) {
+					continue;
+				}
+				$c            = $item->get( 'color' );
+				$colors[ $id ] = ( is_array( $c ) && ! empty( $c[0] ) ) ? $c[0] : '';
+				break;
+			}
+		}
+		return $colors;
+	}
+
+	/**
+	 * The configured "Event Enquiry" calendar id (0 if unset).
+	 *
+	 * @return int
+	 */
+	public static function enquiry_calendar_id() {
+		return (int) get_option( 'meh_event_enquiry_calendar', 0 );
+	}
+
+	/**
+	 * List calendars for pickers (new booking / convert targets).
+	 *
+	 * @return array
+	 */
+	public static function list_calendars() {
+		if ( ! self::available() ) {
+			return array();
+		}
+		$names      = self::calendar_names();
+		$colors     = self::calendar_colors( array_keys( $names ) );
+		$enquiry_id = self::enquiry_calendar_id();
+
+		$out = array();
+		foreach ( $names as $id => $name ) {
+			$out[] = array(
+				'id'         => $id,
+				'name'       => $name,
+				'color'      => $colors[ $id ] ?? '',
+				'is_enquiry' => ( $id === $enquiry_id ),
+				'add_url'    => add_query_arg(
+					array(
+						'page'        => 'wpbs-calendars',
+						'subpage'     => 'edit-calendar',
+						'calendar_id' => $id,
+						'add_booking' => '',
+					),
+					admin_url( 'admin.php' )
+				),
+			);
+		}
+		return $out;
 	}
 
 	/**

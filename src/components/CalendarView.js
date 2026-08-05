@@ -206,6 +206,13 @@ export default function CalendarView() {
 														gridColumn: `${ item.startDay } / ${
 															item.endDay + 1
 														}`,
+														...( item.booking.color
+															? {
+																	backgroundColor:
+																		item.booking
+																			.color,
+															  }
+															: {} ),
 													} }
 													title={ sprintf(
 														/* translators: 1: id 2: guest 3: start 4: end */
