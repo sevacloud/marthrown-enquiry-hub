@@ -63,4 +63,36 @@ class Auth {
 	public static function rest_permission() {
 		return self::current_user_can_access();
 	}
+
+	/**
+	 * Build the login URL, honouring the site's custom login slug.
+	 *
+	 * Uses MEH_LOGIN_SLUG (e.g. `admin-console`) when set, otherwise falls back
+	 * to wp_login_url() (which WPS Hide Login and similar plugins filter). The
+	 * result is filterable via `meh_login_url`.
+	 *
+	 * @param string $redirect_to URL to return to after login.
+	 * @return string
+	 */
+	public static function login_url( $redirect_to = '' ) {
+		$slug = defined( 'MEH_LOGIN_SLUG' ) ? trim( (string) MEH_LOGIN_SLUG, '/' ) : '';
+
+		if ( $slug ) {
+			$url = home_url( '/' . $slug . '/' );
+			if ( $redirect_to ) {
+				// Match core's wp_login_url() encoding.
+				$url = add_query_arg( 'redirect_to', rawurlencode( $redirect_to ), $url );
+			}
+		} else {
+			$url = wp_login_url( $redirect_to );
+		}
+
+		/**
+		 * Filter the login URL used by the hub's redirects.
+		 *
+		 * @param string $url         Login URL.
+		 * @param string $redirect_to Post-login return URL.
+		 */
+		return apply_filters( 'meh_login_url', $url, $redirect_to );
+	}
 }

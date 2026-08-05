@@ -182,7 +182,11 @@ page that reuses the dashboard's table.
 
 Access is restricted:
 
-- Not logged in → redirected to `wp-login` and back to `/bookings` after login.
+- Not logged in → redirected to the login page and back to `/bookings` after
+  login. The login URL honours the site's custom login slug via the
+  `MEH_LOGIN_SLUG` constant (default `admin-console`); set it to `''` to fall
+  back to `wp_login_url()`, or override the whole URL with the `meh_login_url`
+  filter.
 - Logged in without permission → `403`.
 - Allowed roles: `administrator`, `manager`, `operations` (administrators always
   pass). Adjust with the `meh_bookings_allowed_roles` filter:

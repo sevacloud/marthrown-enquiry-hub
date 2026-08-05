@@ -3,7 +3,7 @@
  * Plugin Name:       Marthrown Enquiry Hub
  * Plugin URI:        https://github.com/marthrown/marthrown-enquiry-hub
  * Description:        Unified hub to manage WP Booking System bookings (current, upcoming, past) and event enquiries captured via contact forms. FluentCRM Pro is the source of record for enquiries.
- * Version:           0.1.0
+ * Version:           0.2.0
  * Author:            Liamarjit @ Seva Cloud
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Constants
  * -------------------------------------------------------------------------
  */
-define( 'MEH_VERSION', '0.1.0' );
+define( 'MEH_VERSION', '0.2.0' );
 define( 'MEH_PLUGIN_FILE', __FILE__ );
 define( 'MEH_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MEH_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -33,6 +33,13 @@ define( 'MEH_INCLUDES_DIR', MEH_PLUGIN_DIR . 'includes/' );
 // be identified and removed before go-live.
 if ( ! defined( 'MEH_TEST_PREFIX' ) ) {
 	define( 'MEH_TEST_PREFIX', 'TEST_' );
+}
+
+// Custom login slug (this site hides wp-login.php behind /admin-console).
+// Override in wp-config with define('MEH_LOGIN_SLUG', 'your-slug') or the
+// `meh_login_url` filter. Set to '' to fall back to wp_login_url().
+if ( ! defined( 'MEH_LOGIN_SLUG' ) ) {
+	define( 'MEH_LOGIN_SLUG', 'admin-console' );
 }
 
 /*

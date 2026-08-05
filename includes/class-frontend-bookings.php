@@ -59,9 +59,9 @@ class FrontendBookings {
 			return;
 		}
 
-		// Not logged in -> redirect to the login page, returning here after.
+		// Not logged in -> redirect to the (custom) login page, returning here.
 		if ( ! is_user_logged_in() ) {
-			wp_safe_redirect( wp_login_url( home_url( '/' . self::ROUTE . '/' ) ) );
+			wp_safe_redirect( Auth::login_url( home_url( '/' . self::ROUTE . '/' ) ) );
 			exit;
 		}
 
