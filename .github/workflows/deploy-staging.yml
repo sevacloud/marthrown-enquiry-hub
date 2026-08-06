@@ -8,6 +8,9 @@ on:
   push:
     branches:
       - develop
+  # Allows a manual redeploy from Actions -> Deploy to Staging -> Run workflow,
+  # useful if a push event is ever missed.
+  workflow_dispatch:
 
 concurrency:
   group: deploy-staging

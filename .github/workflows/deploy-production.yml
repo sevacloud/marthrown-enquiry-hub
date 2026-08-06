@@ -8,6 +8,8 @@ on:
   push:
     branches:
       - main
+  # Allows a manual redeploy from Actions -> Deploy to Production -> Run workflow.
+  workflow_dispatch:
 
 concurrency:
   group: deploy-production
