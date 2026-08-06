@@ -60,7 +60,7 @@ export async function getBookings( params = {} ) {
  * @param {string} status           pending|accepted.
  * @return {Promise<{id: number, edit_url: string}>}
  */
-export function convertBooking( id, targetCalendarId, status = 'pending' ) {
+export function convertBooking( id, targetCalendarId, status = 'accepted' ) {
 	return apiFetch( {
 		path: `bookings/${ id }/convert`,
 		method: 'POST',

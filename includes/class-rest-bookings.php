@@ -92,7 +92,7 @@ class RestBookings {
 						'sanitize_callback' => 'absint',
 					),
 					'status'             => array(
-						'default'           => 'pending',
+						'default'           => 'accepted',
 						'sanitize_callback' => 'sanitize_key',
 					),
 				),
@@ -125,7 +125,7 @@ class RestBookings {
 	 * @return \WP_REST_Response|\WP_Error
 	 */
 	public static function convert_booking( $request ) {
-		$result = SourceWpbs::convert_booking(
+		$result = BookingConverter::convert(
 			(int) $request->get_param( 'id' ),
 			(int) $request->get_param( 'target_calendar_id' ),
 			(string) $request->get_param( 'status' )
@@ -175,7 +175,7 @@ class RestBookings {
 			);
 		}
 
-		$data              = SourceWpbs::get_calendar_month( $month );
+		$data              = CalendarReader::get_month( $month );
 		$data['available'] = true;
 		return new \WP_REST_Response( $data, 200 );
 	}

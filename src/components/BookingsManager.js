@@ -102,9 +102,26 @@ export default function BookingsManager() {
 	// Load calendars once for the new-booking + convert pickers.
 	useEffect( () => {
 		getCalendars()
-			.then( ( r ) => setCalendars( r.calendars || [] ) )
+			.then( ( r ) => {
+				const list = r.calendars || [];
+				setCalendars( list );
+				// Default the new-booking picker to the first calendar so the
+				// button always has a target to open.
+				if ( list.length ) {
+					setNewBookingCal( String( list[ 0 ].id ) );
+				}
+			} )
 			.catch( () => setCalendars( [] ) );
 	}, [] );
+
+	const openAddBooking = () => {
+		const target = calendars.find(
+			( c ) => String( c.id ) === newBookingCal
+		);
+		if ( target && target.add_url ) {
+			window.open( target.add_url, '_blank', 'noopener' );
+		}
+	};
 
 	// Convert targets = every calendar that isn't the Event Enquiry one.
 	const convertTargets = calendars.filter( ( c ) => ! c.is_enquiry );
@@ -183,31 +200,17 @@ export default function BookingsManager() {
 									</option>
 								) ) }
 							</select>
-							<a
+							<button
+								type="button"
 								className="button button-primary"
-								href={
-									(
-										calendars.find(
-											( c ) =>
-												String( c.id ) ===
-												newBookingCal
-										) || {}
-									).add_url || '#'
-								}
-								target="_blank"
-								rel="noopener noreferrer"
-								aria-disabled={ ! newBookingCal }
-								onClick={ ( e ) => {
-									if ( ! newBookingCal ) {
-										e.preventDefault();
-									}
-								} }
+								disabled={ ! newBookingCal }
+								onClick={ openAddBooking }
 							>
 								{ __(
 									'Add booking',
 									'marthrown-enquiry-hub'
 								) }
-							</a>
+							</button>
 						</span>
 					) }
 					<button className="button" onClick={ refetch }>

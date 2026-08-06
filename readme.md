@@ -74,9 +74,10 @@ into FluentCRM — and use WPBS's native statuses:
   (e.g. Top Site / Full Site) **programmatically creates a real booking** on it
   (`wpbs_insert_booking`), copying the enquiry's dates and form fields, and
   blocks those dates via the target calendar's "booked" legend
-  (`wpbs_insert_event`). New bookings are created as `pending`; both bookings are
-  cross-referenced (`meh_converted_from` / `meh_converted_to`). WPBS side effects
-  (emails, payments, pricing, inventory) are intentionally not triggered.
+  (`wpbs_insert_event`). New bookings are created as `accepted`; both bookings
+  are cross-referenced (`meh_converted_from` / `meh_converted_to`). WPBS side
+  effects (emails, payments, pricing, inventory) are intentionally not
+  triggered.
 
 Per-booking editing happens in WP Booking System (the **View** link); **Add
 booking** opens its native add-booking screen. A site-wide **Calendar** overview
@@ -126,7 +127,9 @@ marthrown-enquiry-hub/
 ├── includes/
 │   ├── class-auth.php               # shared role/permission checks
 │   ├── class-fluentcrm-writer.php   # shared write path (SubscriberMeta + tag)
-│   ├── class-source-wpbs.php        # WPBS read layer (wpbs_get_bookings)
+│   ├── class-source-wpbs.php        # WPBS list-view reader + shared helpers
+│   ├── class-calendar-reader.php    # month overview + placeholders (cached)
+│   ├── class-booking-converter.php  # enquiry -> booking conversion
 │   ├── class-source-email.php       # Graph API poll -> FluentCRM
 │   ├── class-source-webform.php     # Kadence/Fluent Forms -> FluentCRM
 │   ├── class-cron.php               # WP-Cron (email poll)

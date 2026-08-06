@@ -205,6 +205,8 @@ function meh_bootstrap() {
 
 	// Data sources.
 	require_once MEH_INCLUDES_DIR . 'class-source-wpbs.php';
+	require_once MEH_INCLUDES_DIR . 'class-calendar-reader.php';
+	require_once MEH_INCLUDES_DIR . 'class-booking-converter.php';
 	require_once MEH_INCLUDES_DIR . 'class-source-email.php';
 	require_once MEH_INCLUDES_DIR . 'class-source-webform.php';
 
