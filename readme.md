@@ -136,7 +136,7 @@ marthrown-enquiry-hub/
 │   ├── class-settings.php           # Graph credentials settings screen
 │   ├── class-rest-enquiries.php     # REST: enquiries
 │   ├── class-rest-bookings.php      # REST: bookings (WPBS list view)
-│   ├── class-admin-page.php         # mounts #enquiry-hub-root, enqueues build/
+│   ├── class-admin-page.php         # menu (links to /bookings) + app enqueue
 │   └── class-frontend-bookings.php  # /bookings route hosting the React app
 ├── src/                             # React source (built by wp-scripts)
 │   ├── index.js  index.scss  api.js  App.js
