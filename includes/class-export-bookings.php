@@ -45,6 +45,7 @@ class ExportBookings {
 			array_filter(
 				array(
 					'status'    => isset( $filters['status'] ) ? $filters['status'] : '',
+					'period'    => isset( $filters['period'] ) ? $filters['period'] : '',
 					's'         => isset( $filters['s'] ) ? $filters['s'] : '',
 					'from'      => isset( $filters['from'] ) ? $filters['from'] : '',
 					'to'        => isset( $filters['to'] ) ? $filters['to'] : '',
@@ -69,6 +70,7 @@ class ExportBookings {
 		// phpcs:disable WordPress.Security.NonceVerification.Recommended -- nonce verified above.
 		$args = array(
 			'status'    => isset( $_GET['status'] ) ? sanitize_key( wp_unslash( $_GET['status'] ) ) : 'all',
+			'period'    => isset( $_GET['period'] ) ? sanitize_key( wp_unslash( $_GET['period'] ) ) : 'all',
 			'search'    => isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( $_GET['s'] ) ) : '',
 			'from'      => isset( $_GET['from'] ) ? sanitize_text_field( wp_unslash( $_GET['from'] ) ) : '',
 			'to'        => isset( $_GET['to'] ) ? sanitize_text_field( wp_unslash( $_GET['to'] ) ) : '',

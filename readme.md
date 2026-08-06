@@ -61,8 +61,12 @@ The bookings view recreates the WP Booking System "Booking Manager" list view.
 Bookings are read live via WPBS's own `wpbs_get_bookings()` API — never copied
 into FluentCRM — and use WPBS's native statuses:
 
+- Period tabs: **All bookings / Current / Upcoming / Past** with live counts.
+  Current = today falls within start–end; Upcoming = starts after today;
+  Past = ended before today.
 - Status tabs: **All / Pending / Accepted / Trash** with live counts.
 - Filters: free-text search, start/end date range, and "hide past bookings".
+  Period, status and filters combine, and the CSV export honours all of them.
 - Columns: ID, Calendar, Guest, Start date, End date, Stay length, Status, and a
   **View** link that opens the booking in WP Booking System.
 
@@ -250,9 +254,16 @@ projects, so removing a file from the repo won't delete it on the server. Add
 
 ## Front-end bookings page (`/bookings`)
 
-The hub is also available on the front end at `https://<site>/bookings`, without
-creating a WordPress page. A rewrite rule serves a self-contained, `noindex`
-page that reuses the dashboard's table.
+The hub is available on the front end at `https://<site>/bookings`, without
+creating a WordPress page. A rewrite rule serves the React app in a lightweight
+shell that calls `wp_head()`/`wp_footer()`, so it **inherits the active theme's
+stylesheet** and shows the **site's custom logo** (falling back to the site name)
+in the header.
+
+It is kept out of search engines three ways: a `noindex,nofollow` meta tag, an
+`X-Robots-Tag: noindex, nofollow` response header, and a `Disallow: /bookings/`
+line added to `robots.txt`. It also requires login, so crawlers only ever see the
+login redirect.
 
 Access is restricted:
 

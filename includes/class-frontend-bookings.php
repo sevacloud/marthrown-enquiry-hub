@@ -31,6 +31,37 @@ class FrontendBookings {
 		add_action( 'init', array( __CLASS__, 'add_rewrite' ) );
 		add_filter( 'query_vars', array( __CLASS__, 'add_query_var' ) );
 		add_action( 'template_redirect', array( __CLASS__, 'maybe_render' ) );
+
+		// Keep the hub out of search engines.
+		add_filter( 'wp_robots', array( __CLASS__, 'filter_robots' ) );
+		add_filter( 'robots_txt', array( __CLASS__, 'filter_robots_txt' ), 10, 1 );
+	}
+
+	/**
+	 * Force noindex/nofollow on the hub via the wp_robots filter.
+	 *
+	 * @param array $robots Robots directives.
+	 * @return array
+	 */
+	public static function filter_robots( $robots ) {
+		if ( ! get_query_var( self::QUERY_VAR ) ) {
+			return $robots;
+		}
+		// wp_robots_no_robots() sets noindex + follow; be explicit instead.
+		$robots['noindex']  = true;
+		$robots['nofollow'] = true;
+		unset( $robots['index'], $robots['follow'] );
+		return $robots;
+	}
+
+	/**
+	 * Disallow the hub in robots.txt.
+	 *
+	 * @param string $output Existing robots.txt content.
+	 * @return string
+	 */
+	public static function filter_robots_txt( $output ) {
+		return $output . "\nDisallow: /" . self::ROUTE . "/\n";
 	}
 
 	/**
@@ -83,9 +114,16 @@ class FrontendBookings {
 	 */
 	protected static function render_page() {
 		nocache_headers();
+		// Belt-and-braces: header directive as well as the meta tag, so the page
+		// stays out of search indexes even if something strips the markup.
+		header( 'X-Robots-Tag: noindex, nofollow', true );
 
 		// Enqueue the compiled React bundle + localized data (shared path).
 		AdminPage::enqueue_app();
+
+		// Site stylesheet so the hub inherits the theme's look. Themes enqueue
+		// their CSS on wp_enqueue_scripts, which wp_head() triggers below.
+		wp_enqueue_style( 'meh-frontend', MEH_PLUGIN_URL . 'assets/frontend.css', array(), MEH_VERSION );
 
 		$is_staging = function_exists( 'meh_is_staging' ) && meh_is_staging();
 		?>
@@ -95,9 +133,8 @@ class FrontendBookings {
 	<meta charset="<?php bloginfo( 'charset' ); ?>" />
 	<meta name="viewport" content="width=device-width, initial-scale=1" />
 	<meta name="robots" content="noindex,nofollow" />
-	<title><?php esc_html_e( 'Bookings & Enquiries', 'marthrown-enquiry-hub' ); ?></title>
-	<link rel="stylesheet" href="<?php echo esc_url( MEH_PLUGIN_URL . 'assets/frontend.css' ); ?>?v=<?php echo esc_attr( MEH_VERSION ); ?>" />
-	<?php wp_print_styles(); ?>
+	<title><?php echo esc_html( self::page_title() ); ?></title>
+	<?php wp_head(); ?>
 </head>
 <body class="meh-frontend<?php echo $is_staging ? ' meh-frontend-staging' : ''; ?>">
 	<?php if ( $is_staging ) : ?>
@@ -108,7 +145,10 @@ class FrontendBookings {
 
 	<div class="meh-frontend-wrap">
 		<header class="meh-frontend-header">
-			<h1><?php esc_html_e( 'Bookings & Enquiries', 'marthrown-enquiry-hub' ); ?></h1>
+			<div class="meh-frontend-brand">
+				<?php echo self::site_logo(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- safe markup from core/escaped below. ?>
+				<h1><?php esc_html_e( 'Bookings & Enquiries', 'marthrown-enquiry-hub' ); ?></h1>
+			</div>
 			<p class="meh-frontend-user">
 				<?php
 				printf(
@@ -117,6 +157,7 @@ class FrontendBookings {
 					esc_html( wp_get_current_user()->display_name )
 				);
 				?>
+				&middot; <a href="<?php echo esc_url( admin_url() ); ?>"><?php esc_html_e( 'Dashboard', 'marthrown-enquiry-hub' ); ?></a>
 				&middot; <a href="<?php echo esc_url( wp_logout_url( home_url( '/' . self::ROUTE ) ) ); ?>"><?php esc_html_e( 'Log out', 'marthrown-enquiry-hub' ); ?></a>
 			</p>
 		</header>
@@ -124,9 +165,39 @@ class FrontendBookings {
 		<div id="enquiry-hub-root"></div>
 	</div>
 
-	<?php wp_print_footer_scripts(); ?>
+	<?php wp_footer(); ?>
 </body>
 </html>
 		<?php
+	}
+
+	/**
+	 * Page title: site name + section.
+	 *
+	 * @return string
+	 */
+	protected static function page_title() {
+		return sprintf(
+			/* translators: %s: site name */
+			__( 'Bookings & Enquiries — %s', 'marthrown-enquiry-hub' ),
+			get_bloginfo( 'name' )
+		);
+	}
+
+	/**
+	 * The site's custom logo, linked home; falls back to the site name.
+	 *
+	 * @return string HTML.
+	 */
+	protected static function site_logo() {
+		if ( function_exists( 'has_custom_logo' ) && has_custom_logo() ) {
+			$logo = get_custom_logo();
+			if ( $logo ) {
+				return '<span class="meh-frontend-logo">' . $logo . '</span>';
+			}
+		}
+
+		return '<a class="meh-frontend-sitename" href="' . esc_url( home_url( '/' ) ) . '">'
+			. esc_html( get_bloginfo( 'name' ) ) . '</a>';
 	}
 }

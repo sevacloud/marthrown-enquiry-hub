@@ -52,6 +52,7 @@ class SourceWpbs {
 		}
 
 		$status    = isset( $args['status'] ) ? sanitize_key( $args['status'] ) : 'all';
+		$period    = isset( $args['period'] ) ? sanitize_key( $args['period'] ) : 'all';
 		$search    = isset( $args['search'] ) ? strtolower( trim( (string) $args['search'] ) ) : '';
 		$from      = isset( $args['from'] ) ? (string) $args['from'] : '';
 		$to        = isset( $args['to'] ) ? (string) $args['to'] : '';
@@ -85,15 +86,16 @@ class SourceWpbs {
 		$counts     = self::empty_counts();
 		$today      = current_time( 'Y-m-d' );
 
-		$filters    = compact( 'status', 'search', 'from', 'to', 'hide_past', 'today' );
+		$filters    = compact( 'status', 'period', 'search', 'from', 'to', 'hide_past', 'today' );
 		$colors     = self::calendar_colors( $calendar_ids );
 		$enquiry_id = self::enquiry_calendar_id();
 
 		foreach ( (array) $raw as $booking ) {
 			$row = self::normalize( $booking, $names );
 
-			++$counts['all'];
-			$counts[ $row['status'] ] = ( $counts[ $row['status'] ] ?? 0 ) + 1;
+			// Counts cover both the status tabs and the period tabs, computed
+			// over the whole set so tab totals stay stable as filters change.
+			self::tally( $counts, $row, $today );
 
 			if ( ! self::passes_filters( $row, $filters ) ) {
 				continue;
@@ -146,6 +148,10 @@ class SourceWpbs {
 		if ( 'all' !== $filters['status'] && $row['status'] !== $filters['status'] ) {
 			return false;
 		}
+		if ( ! empty( $filters['period'] ) && 'all' !== $filters['period']
+			&& self::period_of( $row, $filters['today'] ) !== $filters['period'] ) {
+			return false;
+		}
 		if ( $filters['hide_past'] && $row['end_date'] && $row['end_date'] < $filters['today'] ) {
 			return false;
 		}
@@ -159,6 +165,50 @@ class SourceWpbs {
 			return false;
 		}
 		return true;
+	}
+
+	/**
+	 * Add a row to the status + period tab counts.
+	 *
+	 * @param array  $counts Counts, by reference.
+	 * @param array  $row    Normalized row.
+	 * @param string $today  Y-m-d today.
+	 */
+	protected static function tally( &$counts, $row, $today ) {
+		++$counts['all'];
+		$counts[ $row['status'] ] = ( $counts[ $row['status'] ] ?? 0 ) + 1;
+
+		$period = self::period_of( $row, $today );
+		if ( $period ) {
+			$counts[ $period ] = ( $counts[ $period ] ?? 0 ) + 1;
+		}
+	}
+
+	/**
+	 * Classify a booking by date into current | upcoming | past.
+	 *
+	 * current  = today falls within start..end
+	 * upcoming = starts after today
+	 * past     = ended before today
+	 *
+	 * @param array  $row   Normalized booking row.
+	 * @param string $today Y-m-d today.
+	 * @return string '' when the booking has no usable dates.
+	 */
+	public static function period_of( $row, $today ) {
+		$start = $row['start_date'];
+		$end   = $row['end_date'] ? $row['end_date'] : $start;
+
+		if ( ! $start ) {
+			return '';
+		}
+		if ( $start > $today ) {
+			return 'upcoming';
+		}
+		if ( $end < $today ) {
+			return 'past';
+		}
+		return 'current';
 	}
 
 	/**
@@ -421,6 +471,9 @@ class SourceWpbs {
 			'pending'  => 0,
 			'accepted' => 0,
 			'trash'    => 0,
+			'current'  => 0,
+			'upcoming' => 0,
+			'past'     => 0,
 		);
 	}
 }

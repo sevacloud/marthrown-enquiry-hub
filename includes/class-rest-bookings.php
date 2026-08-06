@@ -50,6 +50,13 @@ class RestBookings {
 						'default'           => 'all',
 						'sanitize_callback' => 'sanitize_key',
 					),
+					'period'    => array(
+						'default'           => 'all',
+						'sanitize_callback' => 'sanitize_key',
+						'validate_callback' => function ( $value ) {
+							return in_array( $value, array( 'all', 'current', 'upcoming', 'past' ), true );
+						},
+					),
 					's'         => array( 'sanitize_callback' => 'sanitize_text_field' ),
 					'from'      => array( 'sanitize_callback' => 'sanitize_text_field' ),
 					'to'        => array( 'sanitize_callback' => 'sanitize_text_field' ),
@@ -203,6 +210,7 @@ class RestBookings {
 		$result = SourceWpbs::get_bookings(
 			array(
 				'status'    => $request->get_param( 'status' ),
+				'period'    => $request->get_param( 'period' ),
 				'search'    => (string) $request->get_param( 's' ),
 				'from'      => (string) $request->get_param( 'from' ),
 				'to'        => (string) $request->get_param( 'to' ),

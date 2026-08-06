@@ -75,6 +75,13 @@ const TABS = [
 	{ key: 'trash', label: __( 'Trash', 'marthrown-enquiry-hub' ) },
 ];
 
+const PERIODS = [
+	{ key: 'all', label: __( 'All bookings', 'marthrown-enquiry-hub' ) },
+	{ key: 'current', label: __( 'Current', 'marthrown-enquiry-hub' ) },
+	{ key: 'upcoming', label: __( 'Upcoming', 'marthrown-enquiry-hub' ) },
+	{ key: 'past', label: __( 'Past', 'marthrown-enquiry-hub' ) },
+];
+
 function StatusPill( { status } ) {
 	const icons = {
 		pending: 'marker',
@@ -91,6 +98,7 @@ function StatusPill( { status } ) {
 
 export default function BookingsManager() {
 	const [ status, setStatus ] = useState( 'all' );
+	const [ period, setPeriod ] = useState( 'all' );
 	const [ search, setSearch ] = useState( '' );
 	const [ from, setFrom ] = useState( '' );
 	const [ to, setTo ] = useState( '' );
@@ -152,17 +160,19 @@ export default function BookingsManager() {
 		() =>
 			getBookings( {
 				status,
+				period,
 				s: search,
 				from,
 				to,
 				hide_past: hidePast ? 1 : 0,
 				per_page: 100,
 			} ),
-		[ status, search, from, to, hidePast ]
+		[ status, period, search, from, to, hidePast ]
 	);
 
 	const { data, loading, error, refetch } = usePolling( fetcher, 60000, [
 		status,
+		period,
 		search,
 		from,
 		to,
@@ -252,6 +262,27 @@ export default function BookingsManager() {
 				</Notice>
 			) }
 
+			{ /* Date-based views: all / current / upcoming / past. */ }
+			<div className="meh-period-tabs">
+				{ PERIODS.map( ( p ) => (
+					<button
+						key={ p.key }
+						type="button"
+						className={ `meh-period-tab${
+							period === p.key ? ' is-active' : ''
+						}` }
+						onClick={ () => setPeriod( p.key ) }
+					>
+						{ p.label }
+						<span className="count">
+							{ p.key === 'all'
+								? counts.all || 0
+								: counts[ p.key ] || 0 }
+						</span>
+					</button>
+				) ) }
+			</div>
+
 			<ul className="subsubsub wpbs-bm-tabs">
 				{ TABS.map( ( tab, i ) => (
 					<li key={ tab.key }>
@@ -306,6 +337,7 @@ export default function BookingsManager() {
 					className="button meh-export-button"
 					href={ bookingsExportUrl( {
 						status,
+						period,
 						s: search,
 						from,
 						to,

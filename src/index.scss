@@ -121,6 +121,48 @@
 		}
 	}
 
+	.meh-period-tabs {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		margin: 10px 0 6px;
+	}
+
+	.meh-period-tab {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+		padding: 6px 12px;
+		background: #fff;
+		border: 1px solid #c3c4c7;
+		border-radius: 999px;
+		cursor: pointer;
+		font-size: 13px;
+
+		.count {
+			display: inline-block;
+			min-width: 18px;
+			padding: 0 5px;
+			border-radius: 999px;
+			background: #f0f0f1;
+			color: #50575e;
+			font-size: 11px;
+			text-align: center;
+		}
+
+		&.is-active {
+			background: #2271b1;
+			border-color: #2271b1;
+			color: #fff;
+			font-weight: 600;
+
+			.count {
+				background: rgba( 255, 255, 255, 0.25 );
+				color: #fff;
+			}
+		}
+	}
+
 	.wpbs-bm-tabs {
 		margin: 4px 0 8px;
 		padding: 0;
