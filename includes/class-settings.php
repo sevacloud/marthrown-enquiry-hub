@@ -24,9 +24,9 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Settings {
 
 	const MENU_SLUG    = 'marthrown-enquiry-hub-settings';
-	const PARENT_SLUG  = 'marthrown-enquiry-hub';
 	const CAPABILITY   = 'manage_options';
 	const OPTION_GROUP = 'meh_settings';
+	const OPT_ROLES    = 'meh_allowed_roles';
 
 	/**
 	 * Sentinel value shown in the secret field so we never leak the real one.
@@ -42,17 +42,29 @@ class Settings {
 	}
 
 	/**
-	 * Add the settings submenu under the Enquiry Hub top-level menu.
+	 * Register the settings page under wp-admin → Settings.
+	 *
+	 * The Enquiry Hub top-level menu links to the front-end /bookings hub, so
+	 * the settings screen lives under Settings (administrators only) and is
+	 * surfaced in the hub's side nav for admins.
 	 */
 	public static function register_menu() {
-		add_submenu_page(
-			self::PARENT_SLUG,
+		add_options_page(
 			__( 'Enquiry Hub Settings', 'marthrown-enquiry-hub' ),
-			__( 'Settings', 'marthrown-enquiry-hub' ),
+			__( 'Enquiry Hub', 'marthrown-enquiry-hub' ),
 			self::CAPABILITY,
 			self::MENU_SLUG,
 			array( __CLASS__, 'render_page' )
 		);
+	}
+
+	/**
+	 * The settings page URL.
+	 *
+	 * @return string
+	 */
+	public static function url() {
+		return admin_url( 'options-general.php?page=' . self::MENU_SLUG );
 	}
 
 	/**
@@ -145,6 +157,93 @@ class Settings {
 		}
 
 		self::register_bookings_settings();
+		self::register_access_settings();
+	}
+
+	/**
+	 * Register the Access section — which roles may use the hub.
+	 */
+	public static function register_access_settings() {
+		register_setting(
+			self::OPTION_GROUP,
+			self::OPT_ROLES,
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( __CLASS__, 'sanitize_roles' ),
+				'default'           => Auth::DEFAULT_ROLES,
+			)
+		);
+
+		add_settings_section(
+			'meh_access_section',
+			__( 'Access', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_access_section_intro' ),
+			self::MENU_SLUG
+		);
+
+		add_settings_field(
+			self::OPT_ROLES,
+			__( 'Roles with access', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_roles_field' ),
+			self::MENU_SLUG,
+			'meh_access_section'
+		);
+	}
+
+	/**
+	 * Access section intro.
+	 */
+	public static function render_access_section_intro() {
+		echo '<p>' . esc_html__( 'Choose which roles can open the hub at /bookings and use its REST API. Administrators always have access (so you cannot lock yourself out) — untick other roles to disable them for testing.', 'marthrown-enquiry-hub' ) . '</p>';
+	}
+
+	/**
+	 * Render the roles checkbox list.
+	 */
+	public static function render_roles_field() {
+		$selected = Auth::allowed_roles();
+		$roles    = wp_roles()->get_names();
+
+		echo '<fieldset>';
+		foreach ( $roles as $slug => $label ) {
+			$is_admin = ( 'administrator' === $slug );
+			printf(
+				'<label style="display:block;margin-bottom:4px;"><input type="checkbox" name="%1$s[]" value="%2$s" %3$s %4$s /> %5$s%6$s</label>',
+				esc_attr( self::OPT_ROLES ),
+				esc_attr( $slug ),
+				checked( in_array( $slug, $selected, true ) || $is_admin, true, false ),
+				disabled( $is_admin, true, false ),
+				esc_html( $label ),
+				$is_admin ? ' <em>' . esc_html__( '(always allowed)', 'marthrown-enquiry-hub' ) . '</em>' : ''
+			);
+		}
+		echo '</fieldset>';
+		echo '<p class="description">' . esc_html__( 'Roles listed here come from WordPress, so roles added by a user role editor plugin appear automatically.', 'marthrown-enquiry-hub' ) . '</p>';
+	}
+
+	/**
+	 * Sanitize the roles array against existing WordPress roles.
+	 *
+	 * @param mixed $value Submitted value.
+	 * @return array
+	 */
+	public static function sanitize_roles( $value ) {
+		$valid = array_keys( wp_roles()->get_names() );
+		$out   = array();
+
+		foreach ( (array) $value as $slug ) {
+			$slug = sanitize_key( $slug );
+			if ( in_array( $slug, $valid, true ) ) {
+				$out[] = $slug;
+			}
+		}
+
+		// Administrators must always retain access.
+		if ( ! in_array( 'administrator', $out, true ) ) {
+			$out[] = 'administrator';
+		}
+
+		return array_values( array_unique( $out ) );
 	}
 
 	/**

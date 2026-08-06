@@ -20,20 +20,32 @@ if ( ! defined( 'ABSPATH' ) ) {
 class Auth {
 
 	/**
-	 * Roles allowed to access the hub (in addition to administrators).
+	 * Roles allowed by default when nothing has been saved yet.
+	 */
+	const DEFAULT_ROLES = array( 'administrator', 'manager', 'operations' );
+
+	/**
+	 * Roles allowed to access the hub.
+	 *
+	 * Read from the Access section of the settings screen, falling back to the
+	 * defaults. Administrators are always included so access can't be lost.
 	 *
 	 * @return string[]
 	 */
 	public static function allowed_roles() {
+		$saved = get_option( 'meh_allowed_roles', null );
+		$roles = is_array( $saved ) ? $saved : self::DEFAULT_ROLES;
+
+		if ( ! in_array( 'administrator', $roles, true ) ) {
+			$roles[] = 'administrator';
+		}
+
 		/**
 		 * Filter the roles allowed to access the Enquiry Hub.
 		 *
 		 * @param string[] $roles Role slugs.
 		 */
-		return (array) apply_filters(
-			'meh_allowed_roles',
-			array( 'administrator', 'manager', 'operations' )
-		);
+		return (array) apply_filters( 'meh_allowed_roles', $roles );
 	}
 
 	/**

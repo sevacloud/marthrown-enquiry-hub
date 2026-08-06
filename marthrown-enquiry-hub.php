@@ -3,7 +3,7 @@
  * Plugin Name:       Marthrown Enquiry Hub
  * Plugin URI:        https://github.com/marthrown/marthrown-enquiry-hub
  * Description:        Unified hub to manage WP Booking System bookings (current, upcoming, past) and event enquiries captured via contact forms. FluentCRM Pro is the source of record for enquiries.
- * Version:           0.2.0
+ * Version:           0.3.0
  * Author:            Liamarjit @ Seva Cloud
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Constants
  * -------------------------------------------------------------------------
  */
-define( 'MEH_VERSION', '0.2.0' );
+define( 'MEH_VERSION', '0.3.0' );
 define( 'MEH_PLUGIN_FILE', __FILE__ );
 define( 'MEH_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MEH_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -219,6 +219,7 @@ function meh_bootstrap() {
 	require_once MEH_INCLUDES_DIR . 'class-cron.php';
 	require_once MEH_INCLUDES_DIR . 'class-settings.php';
 	require_once MEH_INCLUDES_DIR . 'class-admin-page.php';
+	require_once MEH_INCLUDES_DIR . 'class-wpbs-banner.php';
 	require_once MEH_INCLUDES_DIR . 'class-frontend-bookings.php';
 
 	// Boot the pieces that register hooks.
@@ -229,6 +230,7 @@ function meh_bootstrap() {
 	\MarthrownEnquiryHub\RestBookings::init();
 	\MarthrownEnquiryHub\ExportBookings::init();
 	\MarthrownEnquiryHub\AdminPage::init();
+	\MarthrownEnquiryHub\WpbsBanner::init();
 	\MarthrownEnquiryHub\FrontendBookings::init();
 }
 add_action( 'plugins_loaded', 'meh_bootstrap' );

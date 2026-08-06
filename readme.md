@@ -89,9 +89,21 @@ The top panel is **New email enquiries** — enquiries with `source-email`.
 Website enquiries are not FluentCRM enquiries: they arrive as WPBS bookings on
 the Event Enquiry calendar and appear in the Bookings Manager / Calendar.
 
+### Settings
+
+The settings screen lives at **wp-admin → Settings → Enquiry Hub**
+(administrators only). The hub's side nav shows a **Settings** link for
+administrators, plus a link across to **WP Booking System**.
+
+**Access** section — tick which roles may open `/bookings` and use the REST API.
+Roles are read from WordPress, so anything added by a user-role-editor plugin
+appears automatically. Administrators are always allowed (and their checkbox is
+disabled) so access can't be locked out; untick other roles to disable them for
+testing.
+
 ### Bookings settings
 
-On **Enquiry Hub → Settings → Bookings**:
+On **Settings → Enquiry Hub → Bookings**:
 
 - **Guest name field** / **Guest email field** — the booking-form field label
   (or field ID) to read the guest name/email from (falls back to heuristics).
@@ -137,6 +149,7 @@ marthrown-enquiry-hub/
 │   ├── class-rest-enquiries.php     # REST: enquiries
 │   ├── class-rest-bookings.php      # REST: bookings (WPBS list view)
 │   ├── class-admin-page.php         # menu (links to /bookings) + app enqueue
+│   ├── class-wpbs-banner.php        # back-link bar on WP Booking System pages
 │   └── class-frontend-bookings.php  # /bookings route hosting the React app
 ├── src/                             # React source (built by wp-scripts)
 │   ├── index.js  index.scss  api.js  App.js
@@ -172,7 +185,7 @@ Microsoft Graph email polling reads credentials from WordPress options:
 | `meh_graph_mailbox`        | Mailbox (UPN/email) to poll                |
 | `meh_graph_folder`         | Mail folder to poll (default `inbox`)      |
 
-These are configured on **Enquiry Hub → Settings**. The Graph app needs the
+These are configured on **Settings → Enquiry Hub**. The Graph app needs the
 `Mail.ReadWrite` application permission (with admin consent) so unread messages
 can be read and then marked as read.
 

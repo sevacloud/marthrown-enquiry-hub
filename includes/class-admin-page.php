@@ -97,6 +97,10 @@ class AdminPage {
 				'exportBase'      => esc_url_raw( admin_url( 'admin-post.php' ) ),
 				'exportAction'    => ExportBookings::ACTION,
 				'exportNonce'     => wp_create_nonce( ExportBookings::NONCE ),
+				// Settings is administrator-only; the side nav hides it otherwise.
+				'isAdmin'         => current_user_can( 'manage_options' ),
+				'settingsUrl'     => esc_url_raw( Settings::url() ),
+				'wpbsUrl'         => esc_url_raw( admin_url( 'admin.php?page=wpbs-bookings' ) ),
 			)
 		);
 	}

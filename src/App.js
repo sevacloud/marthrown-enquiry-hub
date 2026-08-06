@@ -2,6 +2,9 @@
  * App — side nav switching between the Overview (New Enquiries + Bookings
  * Manager) and the site-wide Calendar. The Calendar view mounts only when
  * selected, so its heavier data loads lazily and never blocks the overview.
+ *
+ * The nav also links out to WP Booking System and, for administrators only,
+ * the hub's Settings screen.
  */
 import { __ } from '@wordpress/i18n';
 import { useState } from '@wordpress/element';
@@ -16,7 +19,8 @@ const NAV = [
 
 export default function App() {
 	const [ view, setView ] = useState( 'overview' );
-	const isStaging = !! ( window.mehData && window.mehData.isStaging );
+	const data = window.mehData || {};
+	const isStaging = !! data.isStaging;
 
 	return (
 		<div className="meh-app">
@@ -34,6 +38,7 @@ export default function App() {
 					<h2 className="meh-sidenav__title">
 						{ __( 'Enquiry Hub', 'marthrown-enquiry-hub' ) }
 					</h2>
+
 					<ul>
 						{ NAV.map( ( item ) => (
 							<li key={ item.key }>
@@ -49,6 +54,27 @@ export default function App() {
 							</li>
 						) ) }
 					</ul>
+
+					<ul className="meh-sidenav__links">
+						{ data.wpbsUrl && (
+							<li>
+								<a href={ data.wpbsUrl }>
+									{ __(
+										'WP Booking System',
+										'marthrown-enquiry-hub'
+									) }
+								</a>
+							</li>
+						) }
+						{ /* Settings is administrator-only. */ }
+						{ data.isAdmin && data.settingsUrl && (
+							<li>
+								<a href={ data.settingsUrl }>
+									{ __( 'Settings', 'marthrown-enquiry-hub' ) }
+								</a>
+							</li>
+						) }
+					</ul>
 				</nav>
 
 				<main className="meh-main">
@@ -56,7 +82,10 @@ export default function App() {
 						<>
 							<div className="meh-section">
 								<EnquiryManager
-									title={ __( 'New email enquiries', 'marthrown-enquiry-hub' ) }
+									title={ __(
+										'New email enquiries',
+										'marthrown-enquiry-hub'
+									) }
 									defaultStatus="new"
 									defaultSource="email"
 								/>
