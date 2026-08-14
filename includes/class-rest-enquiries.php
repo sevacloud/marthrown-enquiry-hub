@@ -1,13 +1,18 @@
 <?php
 /**
- * REST: Enquiries.
+ * REST: Event Enquiries (FluentCRM).
+ *
+ * FluentCRM is the source of record for enquiries. A website form inserts the
+ * contact into the configured list ("Event Enquiries") and applies the
+ * configured tag ("Event Enquiry"); this layer reads those contacts and lets
+ * staff move them through a workflow status.
  *
  * Routes under `marthrown-enquiry-hub/v1`:
- *   GET  /enquiries                 — paginated, filterable by source/status/date
- *   POST /enquiries/{id}/status     — set the enquiry status custom field
+ *   GET  /enquiries              — paginated, filterable by status/date/search
+ *   POST /enquiries/{id}/status  — set the workflow status
  *
- * Enquiries are FluentCRM subscribers carrying a `source-*` tag. Status is a
- * subscriber custom field written via SubscriberMeta.
+ * Workflow status is a subscriber custom field, so it never conflicts with
+ * FluentCRM's own subscribed/unsubscribed status.
  *
  * @package MarthrownEnquiryHub
  */
@@ -23,9 +28,10 @@ if ( ! defined( 'ABSPATH' ) ) {
  */
 class RestEnquiries {
 
-	const NAMESPACE   = 'marthrown-enquiry-hub/v1';
-	const STATUS_KEY  = 'meh_enquiry_status';
-	const STATUSES    = array( 'new', 'replied', 'resolved' );
+	const NAMESPACE  = 'marthrown-enquiry-hub/v1';
+	const STATUS_KEY = 'meh_enquiry_status';
+	const STATUSES   = array( 'new', 'replied', 'quoted', 'converted', 'closed' );
+	const FETCH_CAP  = 500;
 
 	/**
 	 * Register routes.
@@ -46,8 +52,11 @@ class RestEnquiries {
 				'callback'            => array( __CLASS__, 'get_enquiries' ),
 				'permission_callback' => array( Auth::class, 'rest_permission' ),
 				'args'                => array(
-					'source'   => array( 'sanitize_callback' => 'sanitize_key' ),
-					'status'   => array( 'sanitize_callback' => 'sanitize_key' ),
+					'status'   => array(
+						'default'           => 'all',
+						'sanitize_callback' => 'sanitize_key',
+					),
+					's'        => array( 'sanitize_callback' => 'sanitize_text_field' ),
 					'from'     => array( 'sanitize_callback' => 'sanitize_text_field' ),
 					'to'       => array( 'sanitize_callback' => 'sanitize_text_field' ),
 					'page'     => array(
@@ -55,7 +64,7 @@ class RestEnquiries {
 						'sanitize_callback' => 'absint',
 					),
 					'per_page' => array(
-						'default'           => 20,
+						'default'           => 25,
 						'sanitize_callback' => 'absint',
 					),
 				),
@@ -84,61 +93,210 @@ class RestEnquiries {
 	}
 
 	/**
+	 * Whether FluentCRM is usable.
+	 *
+	 * @return bool
+	 */
+	public static function available() {
+		return function_exists( 'FluentCrmApi' ) && class_exists( '\FluentCrm\App\Models\Subscriber' );
+	}
+
+	/**
 	 * GET /enquiries handler.
 	 *
 	 * @param \WP_REST_Request $request Request.
-	 * @return \WP_REST_Response|\WP_Error
+	 * @return \WP_REST_Response
 	 */
 	public static function get_enquiries( $request ) {
-		if ( ! function_exists( 'FluentCrmApi' ) || ! class_exists( '\FluentCrm\App\Models\Subscriber' ) ) {
-			return new \WP_Error( 'meh_no_fluentcrm', __( 'FluentCRM is not available.', 'marthrown-enquiry-hub' ), array( 'status' => 503 ) );
-		}
-
-		$source   = $request->get_param( 'source' );
-		$status   = $request->get_param( 'status' );
-		$from     = $request->get_param( 'from' );
-		$to       = $request->get_param( 'to' );
-		$page     = max( 1, (int) $request->get_param( 'page' ) );
-		$per_page = min( 100, max( 1, (int) $request->get_param( 'per_page' ) ) );
-
-		$tag_ids = self::source_tag_ids( $source );
-		if ( empty( $tag_ids ) ) {
-			return self::collection( array(), 0, $page, $per_page );
-		}
-
-		$query = \FluentCrm\App\Models\Subscriber::query()
-			->whereHas(
-				'tags',
-				function ( $q ) use ( $tag_ids ) {
-					$q->whereIn( 'fc_tags.id', $tag_ids );
-				}
+		if ( ! self::available() ) {
+			$response = new \WP_REST_Response(
+				array(
+					'items'     => array(),
+					'counts'    => self::empty_counts(),
+					'available' => false,
+				),
+				200
 			);
-
-		if ( $from ) {
-			$query->where( 'created_at', '>=', $from . ' 00:00:00' );
-		}
-		if ( $to ) {
-			$query->where( 'created_at', '<=', $to . ' 23:59:59' );
+			$response->header( 'X-WP-Total', 0 );
+			return $response;
 		}
 
-		$total       = ( clone $query )->count();
-		$subscribers = $query->orderBy( 'created_at', 'desc' )
-			->offset( ( $page - 1 ) * $per_page )
-			->limit( $per_page )
-			->get();
+		$status   = sanitize_key( (string) $request->get_param( 'status' ) );
+		$search   = strtolower( trim( (string) $request->get_param( 's' ) ) );
+		$from     = (string) $request->get_param( 'from' );
+		$to       = (string) $request->get_param( 'to' );
+		$page     = max( 1, (int) $request->get_param( 'page' ) );
+		$per_page = min( 200, max( 1, (int) $request->get_param( 'per_page' ) ) );
 
-		$items = array();
+		$subscribers = self::query_subscribers();
+
+		$rows   = array();
+		$counts = self::empty_counts();
+
 		foreach ( $subscribers as $subscriber ) {
-			$row = self::format_subscriber( $subscriber );
+			$row = self::format( $subscriber );
 
-			// Status filter is applied post-hoc (status lives in meta).
-			if ( $status && $row['status'] !== $status ) {
+			++$counts['all'];
+			$counts[ $row['status'] ] = ( $counts[ $row['status'] ] ?? 0 ) + 1;
+
+			if ( ! self::passes( $row, $status, $search, $from, $to ) ) {
 				continue;
 			}
-			$items[] = $row;
+			$rows[] = $row;
 		}
 
-		return self::collection( $items, $total, $page, $per_page );
+		$total  = count( $rows );
+		$offset = ( $page - 1 ) * $per_page;
+		$items  = array_slice( $rows, $offset, $per_page );
+
+		$response = new \WP_REST_Response(
+			array(
+				'items'     => $items,
+				'counts'    => $counts,
+				'available' => true,
+				'source'    => array(
+					'list' => Settings::enquiry_list_id(),
+					'tag'  => Settings::enquiry_tag_id(),
+				),
+			),
+			200
+		);
+		$response->header( 'X-WP-Total', (int) $total );
+		$response->header( 'X-WP-TotalPages', (int) ceil( $total / $per_page ) );
+		return $response;
+	}
+
+	/**
+	 * Fetch subscribers in the configured Event Enquiries list / tag.
+	 *
+	 * If neither is configured we return nothing rather than the whole CRM.
+	 *
+	 * @return array
+	 */
+	protected static function query_subscribers() {
+		$list_id = Settings::enquiry_list_id();
+		$tag_id  = Settings::enquiry_tag_id();
+
+		if ( ! $list_id && ! $tag_id ) {
+			return array();
+		}
+
+		$query = \FluentCrm\App\Models\Subscriber::query();
+
+		if ( $list_id ) {
+			$query->whereHas(
+				'lists',
+				function ( $q ) use ( $list_id ) {
+					$q->where( 'fc_lists.id', $list_id );
+				}
+			);
+		}
+		if ( $tag_id ) {
+			$query->whereHas(
+				'tags',
+				function ( $q ) use ( $tag_id ) {
+					$q->where( 'fc_tags.id', $tag_id );
+				}
+			);
+		}
+
+		return $query->orderBy( 'created_at', 'desc' )
+			->limit( self::FETCH_CAP )
+			->get();
+	}
+
+	/**
+	 * Whether a formatted row passes the active filters.
+	 *
+	 * @param array  $row    Row.
+	 * @param string $status Status filter.
+	 * @param string $search Lower-cased search term.
+	 * @param string $from   From date (Y-m-d).
+	 * @param string $to     To date (Y-m-d).
+	 * @return bool
+	 */
+	protected static function passes( $row, $status, $search, $from, $to ) {
+		if ( $status && 'all' !== $status && $row['status'] !== $status ) {
+			return false;
+		}
+		$day = substr( (string) $row['date'], 0, 10 );
+		if ( $from && $day && $day < $from ) {
+			return false;
+		}
+		if ( $to && $day && $day > $to ) {
+			return false;
+		}
+		if ( $search && false === strpos( strtolower( $row['haystack'] ), $search ) ) {
+			return false;
+		}
+		return true;
+	}
+
+	/**
+	 * Format a subscriber as an enquiry row.
+	 *
+	 * @param object $subscriber Subscriber model.
+	 * @return array
+	 */
+	protected static function format( $subscriber ) {
+		$id    = (int) $subscriber->id;
+		$name  = trim( (string) $subscriber->first_name . ' ' . (string) $subscriber->last_name );
+		$email = (string) $subscriber->email;
+		$phone = (string) ( $subscriber->phone ?? '' );
+		$note  = self::latest_note( $id );
+
+		return array(
+			'id'          => $id,
+			'name'        => $name,
+			'email'       => $email,
+			'phone'       => $phone,
+			'note'        => $note,
+			'status'      => self::get_status( $id ),
+			'crm_status'  => (string) $subscriber->status,
+			'date'        => (string) $subscriber->created_at,
+			'tags'        => self::tag_titles( $subscriber ),
+			'crm_url'     => admin_url( 'admin.php?page=fluentcrm-admin#/subscribers/' . $id ),
+			'haystack'    => strtolower( $name . ' ' . $email . ' ' . $phone . ' ' . $note ),
+		);
+	}
+
+	/**
+	 * The most recent note/activity body for a subscriber.
+	 *
+	 * @param int $subscriber_id Subscriber ID.
+	 * @return string
+	 */
+	protected static function latest_note( $subscriber_id ) {
+		if ( ! class_exists( '\FluentCrm\App\Models\SubscriberNote' ) ) {
+			return '';
+		}
+
+		$note = \FluentCrm\App\Models\SubscriberNote::where( 'subscriber_id', (int) $subscriber_id )
+			->orderBy( 'id', 'desc' )
+			->first();
+
+		if ( ! $note ) {
+			return '';
+		}
+
+		$body = trim( wp_strip_all_tags( (string) $note->description ) );
+		return $body ? $body : trim( (string) $note->title );
+	}
+
+	/**
+	 * Tag titles for a subscriber.
+	 *
+	 * @param object $subscriber Subscriber model.
+	 * @return array
+	 */
+	protected static function tag_titles( $subscriber ) {
+		$titles = array();
+		if ( isset( $subscriber->tags ) ) {
+			foreach ( $subscriber->tags as $tag ) {
+				$titles[] = (string) $tag->title;
+			}
+		}
+		return $titles;
 	}
 
 	/**
@@ -166,6 +324,14 @@ class RestEnquiries {
 			)
 		);
 
+		/**
+		 * Fires after an enquiry's workflow status changes.
+		 *
+		 * @param int    $id     Subscriber ID.
+		 * @param string $status New status.
+		 */
+		do_action( 'meh_enquiry_status_changed', $id, $status );
+
 		return new \WP_REST_Response(
 			array(
 				'id'     => $id,
@@ -176,34 +342,12 @@ class RestEnquiries {
 	}
 
 	/**
-	 * Format a subscriber into an enquiry row.
-	 *
-	 * @param object $subscriber Subscriber model.
-	 * @return array
-	 */
-	protected static function format_subscriber( $subscriber ) {
-		$note = class_exists( __NAMESPACE__ . '\\FluentCrmWriter' )
-			? FluentCrmWriter::get_latest_note( $subscriber->id )
-			: null;
-
-		return array(
-			'id'      => (int) $subscriber->id,
-			'name'    => trim( $subscriber->first_name . ' ' . $subscriber->last_name ),
-			'email'   => $subscriber->email,
-			'sources' => self::subscriber_sources( $subscriber ),
-			'note'    => $note && ! empty( $note['message'] ) ? $note['message'] : '',
-			'status'  => self::get_status( $subscriber->id ),
-			'date'    => $subscriber->created_at,
-		);
-	}
-
-	/**
-	 * Read a subscriber's enquiry status meta.
+	 * Read a subscriber's workflow status.
 	 *
 	 * @param int $subscriber_id Subscriber ID.
 	 * @return string
 	 */
-	protected static function get_status( $subscriber_id ) {
+	public static function get_status( $subscriber_id ) {
 		if ( ! class_exists( '\FluentCrm\App\Models\SubscriberMeta' ) ) {
 			return 'new';
 		}
@@ -212,62 +356,20 @@ class RestEnquiries {
 			->where( 'key', self::STATUS_KEY )
 			->first();
 
-		return ( $meta && $meta->value ) ? (string) $meta->value : 'new';
+		$value = $meta ? (string) $meta->value : '';
+		return in_array( $value, self::STATUSES, true ) ? $value : 'new';
 	}
 
 	/**
-	 * Resolve source tag ids, optionally restricted to a single source.
+	 * Empty status counts scaffold.
 	 *
-	 * @param string $source Optional source slug (without prefix).
-	 * @return int[]
+	 * @return array
 	 */
-	protected static function source_tag_ids( $source ) {
-		if ( ! class_exists( '\FluentCrm\App\Models\Tag' ) ) {
-			return array();
+	protected static function empty_counts() {
+		$counts = array( 'all' => 0 );
+		foreach ( self::STATUSES as $status ) {
+			$counts[ $status ] = 0;
 		}
-		$tags    = \FluentCrm\App\Models\Tag::where( 'slug', 'like', 'source-%' )->get();
-		$tag_ids = array();
-		foreach ( $tags as $tag ) {
-			$slug = preg_replace( '/^source-/', '', $tag->slug );
-			if ( $source && $slug !== $source ) {
-				continue;
-			}
-			$tag_ids[] = $tag->id;
-		}
-		return $tag_ids;
-	}
-
-	/**
-	 * List a subscriber's source slugs.
-	 *
-	 * @param object $subscriber Subscriber model.
-	 * @return string[]
-	 */
-	protected static function subscriber_sources( $subscriber ) {
-		$sources = array();
-		if ( isset( $subscriber->tags ) ) {
-			foreach ( $subscriber->tags as $tag ) {
-				if ( 0 === strpos( $tag->slug, 'source-' ) ) {
-					$sources[] = preg_replace( '/^source-/', '', $tag->slug );
-				}
-			}
-		}
-		return $sources;
-	}
-
-	/**
-	 * Build a paginated collection response with headers.
-	 *
-	 * @param array $items    Items.
-	 * @param int   $total    Total matched.
-	 * @param int   $page     Page.
-	 * @param int   $per_page Page size.
-	 * @return \WP_REST_Response
-	 */
-	protected static function collection( $items, $total, $page, $per_page ) {
-		$response = new \WP_REST_Response( $items, 200 );
-		$response->header( 'X-WP-Total', (int) $total );
-		$response->header( 'X-WP-TotalPages', (int) ceil( $total / max( 1, $per_page ) ) );
-		return $response;
+		return $counts;
 	}
 }

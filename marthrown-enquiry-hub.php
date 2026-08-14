@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Marthrown Enquiry Hub
  * Plugin URI:        https://github.com/marthrown/marthrown-enquiry-hub
- * Description:        Unified hub to manage WP Booking System bookings (current, upcoming, past) and event enquiries captured via contact forms. FluentCRM Pro is the source of record for enquiries.
+ * Description:        Unified hub to manage WP Booking System bookings (current, upcoming, past) and event enquiries. FluentCRM Pro is the source of record for enquiries: a website form adds contacts to the "Event Enquiries" list with the "Event Enquiry" tag, and the hub reads them from there.
  * Version:           0.3.0
  * Author:            Liamarjit @ Seva Cloud
  * License:           GPL-2.0-or-later
@@ -145,11 +145,8 @@ function meh_missing_dependency_notice() {
  * dependency so activation never fatals; the admin notice will guide the user.
  */
 function meh_activate() {
-	// Cron class must be available to (re)schedule events on activation.
-	require_once MEH_INCLUDES_DIR . 'class-cron.php';
-	if ( class_exists( '\MarthrownEnquiryHub\Cron' ) ) {
-		\MarthrownEnquiryHub\Cron::schedule_events();
-	}
+	// Retire cron events from earlier versions (email polling / WPBS sync).
+	meh_clear_legacy_cron();
 
 	// Register the /bookings rewrite rule before flushing so the pretty URL
 	// works immediately after activation.
@@ -170,12 +167,21 @@ function meh_activate() {
  * Clears scheduled cron events so nothing lingers after deactivation.
  */
 function meh_deactivate() {
-	require_once MEH_INCLUDES_DIR . 'class-cron.php';
-	if ( class_exists( '\MarthrownEnquiryHub\Cron' ) ) {
-		\MarthrownEnquiryHub\Cron::clear_events();
-	}
-
+	meh_clear_legacy_cron();
 	flush_rewrite_rules();
+}
+
+/**
+ * Clear scheduled events from earlier versions.
+ *
+ * The plugin no longer runs any cron: enquiries are read live from FluentCRM and
+ * bookings live from WP Booking System. These hooks are cleared so schedules
+ * left over from the email-polling era don't linger.
+ */
+function meh_clear_legacy_cron() {
+	foreach ( array( 'meh_cron_email_poll', 'meh_cron_wpbs_poll' ) as $hook ) {
+		wp_clear_scheduled_hook( $hook );
+	}
 }
 
 register_activation_hook( __FILE__, 'meh_activate' );
@@ -201,30 +207,24 @@ function meh_bootstrap() {
 
 	// Shared services.
 	require_once MEH_INCLUDES_DIR . 'class-auth.php';
-	require_once MEH_INCLUDES_DIR . 'class-fluentcrm-writer.php';
 
-	// Data sources.
+	// Data layer: bookings from WPBS, enquiries from FluentCRM.
 	require_once MEH_INCLUDES_DIR . 'class-source-wpbs.php';
 	require_once MEH_INCLUDES_DIR . 'class-calendar-reader.php';
 	require_once MEH_INCLUDES_DIR . 'class-booking-converter.php';
-	require_once MEH_INCLUDES_DIR . 'class-source-email.php';
-	require_once MEH_INCLUDES_DIR . 'class-source-webform.php';
 
 	// REST API layer (the contract the React app consumes).
 	require_once MEH_INCLUDES_DIR . 'class-rest-enquiries.php';
 	require_once MEH_INCLUDES_DIR . 'class-rest-bookings.php';
 	require_once MEH_INCLUDES_DIR . 'class-export-bookings.php';
 
-	// Scheduling + UI.
-	require_once MEH_INCLUDES_DIR . 'class-cron.php';
+	// UI.
 	require_once MEH_INCLUDES_DIR . 'class-settings.php';
 	require_once MEH_INCLUDES_DIR . 'class-admin-page.php';
 	require_once MEH_INCLUDES_DIR . 'class-wpbs-banner.php';
 	require_once MEH_INCLUDES_DIR . 'class-frontend-bookings.php';
 
 	// Boot the pieces that register hooks.
-	\MarthrownEnquiryHub\SourceWebform::init();
-	\MarthrownEnquiryHub\Cron::init();
 	\MarthrownEnquiryHub\Settings::init();
 	\MarthrownEnquiryHub\RestEnquiries::init();
 	\MarthrownEnquiryHub\RestBookings::init();

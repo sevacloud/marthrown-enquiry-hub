@@ -8,13 +8,26 @@ import apiFetch from '@wordpress/api-fetch';
 import { addQueryArgs } from '@wordpress/url';
 
 /**
- * Fetch enquiries with optional filters, returning items + total pages.
+ * Fetch event enquiries (FluentCRM) with optional filters.
  *
- * @param {Object} params { source, status, from, to, page, per_page }
- * @return {Promise<{items: Array, totalPages: number, total: number}>}
+ * @param {Object} params { status, s, from, to, page, per_page }
+ * @return {Promise<{items: Array, counts: Object, available: boolean, source: Object, total: number, totalPages: number}>}
  */
 export async function getEnquiries( params = {} ) {
-	return fetchWithTotals( addQueryArgs( 'enquiries', params ) );
+	const { body, response } = await fetchRaw(
+		addQueryArgs( 'enquiries', params )
+	);
+	return {
+		items: body.items || [],
+		counts: body.counts || {},
+		available: body.available !== false,
+		source: body.source || {},
+		total: parseInt( response.headers.get( 'X-WP-Total' ) || '0', 10 ),
+		totalPages: parseInt(
+			response.headers.get( 'X-WP-TotalPages' ) || '1',
+			10
+		),
+	};
 }
 
 /**
@@ -114,24 +127,4 @@ async function fetchRaw( path ) {
 	const response = await apiFetch( { path, parse: false } );
 	const body = await response.json();
 	return { body, response };
-}
-
-/**
- * Run an apiFetch that also reads pagination headers (for endpoints returning
- * a bare array of items).
- *
- * @param {string} path Request path.
- * @return {Promise<{items: Array, totalPages: number, total: number}>}
- */
-async function fetchWithTotals( path ) {
-	const response = await apiFetch( { path, parse: false } );
-	const items = await response.json();
-	return {
-		items,
-		total: parseInt( response.headers.get( 'X-WP-Total' ) || '0', 10 ),
-		totalPages: parseInt(
-			response.headers.get( 'X-WP-TotalPages' ) || '1',
-			10
-		),
-	};
 }

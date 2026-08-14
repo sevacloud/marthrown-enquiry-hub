@@ -95,10 +95,23 @@
 		background: #d7e8fb;
 		color: #0a4b78;
 	}
-	&--resolved {
+	&--quoted {
+		background: #e6dcf7;
+		color: #3c2a70;
+	}
+	&--converted {
 		background: #d7f0dd;
 		color: #114a26;
 	}
+	&--closed {
+		background: #e6e6e8;
+		color: #50575e;
+	}
+}
+
+.meh-muted {
+	color: #646970;
+	font-size: 12px;
 }
 
 /* --- Bookings Manager (WPBS-style) --- */

@@ -83,11 +83,10 @@ export default function App() {
 							<div className="meh-section">
 								<EnquiryManager
 									title={ __(
-										'New email enquiries',
+										'Event enquiries',
 										'marthrown-enquiry-hub'
 									) }
 									defaultStatus="new"
-									defaultSource="email"
 								/>
 							</div>
 							<div className="meh-section">

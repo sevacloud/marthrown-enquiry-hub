@@ -10,13 +10,13 @@ the source of record for enquiries.
   reading bookings live via WPBS's own API (native Pending/Accepted/Trash
   statuses). Booking *management* (calendar, editing) stays inside WP Booking
   System.
-- **Enquiries** — collects enquiries from two sources and writes them into
-  FluentCRM Pro through a single shared write path:
-  - Web form submissions (Kadence Forms, Fluent Forms)
-  - Email (Microsoft Graph API mailbox poll)
-- **Respond & manage** — from the hub the team triages **new enquiries**
-  (marking them replied/resolved) and reviews bookings. Enquiry state is stored
-  in FluentCRM.
+- **Event enquiries** — read from **FluentCRM**, which is the source of record.
+  A website form (e.g. Kadence Forms) adds the contact to the **Event Enquiries**
+  list and applies the **Event Enquiry** tag; the hub lists those contacts. The
+  plugin does not hook the form itself and no longer polls email.
+- **Respond & manage** — the team triages enquiries through a workflow status
+  (new → replied → quoted → converted / closed) stored on the FluentCRM contact,
+  and reviews bookings alongside them.
 
 ## Requirements
 
@@ -31,9 +31,9 @@ PHP is a pure REST API layer; the UI is a React app built with
 `@wordpress/scripts` (using WordPress core's bundled `wp-element`,
 `@wordpress/components`, and `@wordpress/api-fetch` — no separate React ship).
 
-- **Enquiries** come from web forms, email (Graph), and WPBS submissions, and
-  are logged into FluentCRM (source of record) via a shared writer, tagged by
-  source. The React app reads/updates them through the REST API.
+- **Enquiries** live in FluentCRM. The hub reads contacts in the configured
+  Event Enquiries list / Event Enquiry tag and updates a workflow status on them.
+  Nothing is written into FluentCRM by this plugin except that status.
 - **Bookings** are NOT copied into FluentCRM. They are read live via WPBS's
   `wpbs_get_bookings()` API and presented in a list view that mirrors the WP
   Booking System Booking Manager.
@@ -42,8 +42,8 @@ PHP is a pure REST API layer; the UI is a React app built with
 
 | Method + route                        | Purpose                                        |
 | ------------------------------------- | ---------------------------------------------- |
-| `GET /enquiries`                      | Paginated, filterable by source/status/date    |
-| `POST /enquiries/{id}/status`         | Set enquiry status (new/replied/resolved)      |
+| `GET /enquiries`                      | FluentCRM enquiries, filterable by status/date/search, with counts |
+| `POST /enquiries/{id}/status`         | Set workflow status (new/replied/quoted/converted/closed) |
 | `GET /bookings?status=…&s=&from=&to=&hide_past=` | Booking list, paginated, with status counts |
 | `GET /bookings/calendar?month=YYYY-MM` | Site-wide month overview (cached): bookings + placeholders |
 | `POST /bookings/{id}/convert`         | Convert an enquiry booking into a real booking |
@@ -89,9 +89,7 @@ is on the side nav, with booking bars coloured by each calendar's WPBS legend
 colour, and **placeholders** (manual, non-booking day markers) drawn as dashed
 striped bars labelled with their legend item.
 
-The top panel is **New email enquiries** — enquiries with `source-email`.
-Website enquiries are not FluentCRM enquiries: they arrive as WPBS bookings on
-the Event Enquiry calendar and appear in the Bookings Manager / Calendar.
+The top panel is **Event enquiries**, read from FluentCRM (see Enquiry intake).
 
 ### Settings
 
@@ -142,15 +140,11 @@ marthrown-enquiry-hub/
 ├── marthrown-enquiry-hub.php        # bootstrap, dependency check, activation
 ├── includes/
 │   ├── class-auth.php               # shared role/permission checks
-│   ├── class-fluentcrm-writer.php   # shared write path (SubscriberMeta + tag)
 │   ├── class-source-wpbs.php        # WPBS list-view reader + shared helpers
 │   ├── class-calendar-reader.php    # month overview + placeholders (cached)
-│   ├── class-booking-converter.php  # enquiry -> booking conversion
-│   ├── class-source-email.php       # Graph API poll -> FluentCRM
-│   ├── class-source-webform.php     # Kadence/Fluent Forms -> FluentCRM
-│   ├── class-cron.php               # WP-Cron (email poll)
-│   ├── class-settings.php           # Graph credentials settings screen
-│   ├── class-rest-enquiries.php     # REST: enquiries
+│   ├── class-booking-converter.php  # enquiry hold -> booking conversion
+│   ├── class-settings.php           # settings screen (enquiries/bookings/access)
+│   ├── class-rest-enquiries.php     # REST: enquiries (FluentCRM list + tag)
 │   ├── class-rest-bookings.php      # REST: bookings (WPBS list view)
 │   ├── class-admin-page.php         # menu (links to /bookings) + app enqueue
 │   ├── class-wpbs-banner.php        # back-link bar on WP Booking System pages
@@ -177,46 +171,31 @@ CI runs `npm install && npm run build` before the SFTP deploy, and only the
 compiled `build/` ships (see `.lftp_ignore`). Commit a `package-lock.json` to
 switch CI to `npm ci` with dependency caching.
 
-## Configuration
+## Enquiry intake
 
-Microsoft Graph email polling reads credentials from WordPress options:
+The plugin does **not** capture enquiries itself — the website form does, and the
+hub reads the result. Point your Kadence Form (or Fluent Forms) at FluentCRM so a
+submission:
 
-| Option                     | Purpose                                    |
-| -------------------------- | ------------------------------------------ |
-| `meh_graph_tenant_id`      | Entra (Azure AD) tenant ID                 |
-| `meh_graph_client_id`      | App registration client ID                 |
-| `meh_graph_client_secret`  | App registration client secret (obfuscated)|
-| `meh_graph_mailbox`        | Mailbox (UPN/email) to poll                |
-| `meh_graph_folder`         | Mail folder to poll (default `inbox`)      |
+1. creates/updates the contact, and
+2. adds it to the **Event Enquiries** list and applies the **Event Enquiry** tag.
 
-These are configured on **Settings → Enquiry Hub**. The Graph app needs the
-`Mail.ReadWrite` application permission (with admin consent) so unread messages
-can be read and then marked as read.
+The hub then lists those contacts. Configure which list/tag to read on
+**Settings → Enquiry Hub → Enquiries**; if nothing is saved, the plugin
+auto-detects them by those names. When both a list and a tag are set, a contact
+must match both to appear.
 
-Set these via a settings screen or `update_option()`. Store the client secret
-securely — never commit it to the repository.
+There is **no cron and no email polling** — enquiries are read live from
+FluentCRM and bookings live from WP Booking System. Legacy cron events from the
+email-polling era are cleared on activation/deactivation.
 
-## Scheduling
+### Enquiry workflow status
 
-One WP-Cron event runs every 15 minutes:
+Status is stored per contact via `SubscriberMeta`
+(`object_type = 'custom_field'`, key `meh_enquiry_status`), so it never clashes
+with FluentCRM's own subscribed/unsubscribed status:
 
-- `meh_cron_email_poll` — polls the Graph mailbox folder for unread messages.
-
-Bookings are read live from WPBS on request, so there is no booking cron. The
-event is registered on activation and cleared on deactivation.
-
-## Tags used
-
-Every enquiry is tagged by source so the dashboard can list and filter it:
-
-| Tag slug         | Meaning                            |
-| ---------------- | ---------------------------------- |
-| `source-webform` | Enquiry from a web form            |
-| `source-email`   | Enquiry from email (Graph)         |
-| `source-wpbs`    | Enquiry from WP Booking System     |
-
-The latest enquiry note is stored per subscriber via `SubscriberMeta`
-(`object_type = 'custom_field'`, key `meh_latest_enquiry`).
+`new` → `replied` → `quoted` → `converted` / `closed`
 
 ## Deployment
 

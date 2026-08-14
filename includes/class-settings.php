@@ -2,12 +2,12 @@
 /**
  * Settings screen.
  *
- * Registers a submenu under "Enquiry Hub" for configuring the Microsoft Graph
- * mailbox credentials used by SourceEmail. Built on the WordPress Settings API
- * so validation, nonces and saving are handled by core.
+ * Lives at wp-admin → Settings → Enquiry Hub (administrators only) and is
+ * surfaced in the hub's side nav for admins. Three sections:
  *
- * The Graph client secret is obfuscated at rest and never echoed back into the
- * form; only a masked placeholder is shown.
+ *   - Enquiries : which FluentCRM list/tag holds event enquiries.
+ *   - Bookings  : WPBS guest field mapping + the Event Enquiry calendar.
+ *   - Access    : which roles may use the hub.
  *
  * @package MarthrownEnquiryHub
  */
@@ -26,12 +26,16 @@ class Settings {
 	const MENU_SLUG    = 'marthrown-enquiry-hub-settings';
 	const CAPABILITY   = 'manage_options';
 	const OPTION_GROUP = 'meh_settings';
-	const OPT_ROLES    = 'meh_allowed_roles';
+
+	const OPT_ROLES        = 'meh_allowed_roles';
+	const OPT_ENQUIRY_LIST = 'meh_enquiry_list';
+	const OPT_ENQUIRY_TAG  = 'meh_enquiry_tag';
 
 	/**
-	 * Sentinel value shown in the secret field so we never leak the real one.
+	 * Default titles used to auto-detect the list/tag before anything is saved.
 	 */
-	const SECRET_MASK = '********';
+	const DEFAULT_LIST_TITLE = 'Event Enquiries';
+	const DEFAULT_TAG_TITLE  = 'Event Enquiry';
 
 	/**
 	 * Register hooks.
@@ -43,10 +47,6 @@ class Settings {
 
 	/**
 	 * Register the settings page under wp-admin → Settings.
-	 *
-	 * The Enquiry Hub top-level menu links to the front-end /bookings hub, so
-	 * the settings screen lives under Settings (administrators only) and is
-	 * surfaced in the hub's side nav for admins.
 	 */
 	public static function register_menu() {
 		add_options_page(
@@ -71,94 +71,312 @@ class Settings {
 	 * Register settings, sections and fields.
 	 */
 	public static function register_settings() {
-		$text_args = array(
-			'type'              => 'string',
-			'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
-			'default'           => '',
-		);
+		self::register_enquiry_settings();
+		self::register_bookings_settings();
+		self::register_access_settings();
+	}
 
-		register_setting( self::OPTION_GROUP, SourceEmail::OPT_TENANT, $text_args );
-		register_setting( self::OPTION_GROUP, SourceEmail::OPT_CLIENT, $text_args );
-		register_setting(
-			self::OPTION_GROUP,
-			SourceEmail::OPT_SECRET,
-			array(
-				'type'              => 'string',
-				'sanitize_callback' => array( __CLASS__, 'sanitize_secret' ),
-				'default'           => '',
-			)
-		);
-		register_setting(
-			self::OPTION_GROUP,
-			SourceEmail::OPT_MAILBOX,
-			array(
-				'type'              => 'string',
-				'sanitize_callback' => array( __CLASS__, 'sanitize_mailbox' ),
-				'default'           => '',
-			)
-		);
-		register_setting(
-			self::OPTION_GROUP,
-			SourceEmail::OPT_FOLDER,
-			array(
-				'type'              => 'string',
-				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
-				'default'           => 'inbox',
-			)
-		);
+	/*
+	 * ---------------------------------------------------------------------
+	 * Enquiries (FluentCRM source).
+	 * ---------------------------------------------------------------------
+	 */
 
-		add_settings_section(
-			'meh_graph_section',
-			__( 'Microsoft Graph (Email Enquiries)', 'marthrown-enquiry-hub' ),
-			array( __CLASS__, 'render_graph_section_intro' ),
-			self::MENU_SLUG
-		);
-
-		$fields = array(
-			SourceEmail::OPT_TENANT  => array(
-				'label'    => __( 'Tenant ID', 'marthrown-enquiry-hub' ),
-				'callback' => 'render_text_field',
-				'desc'     => __( 'Azure AD directory (tenant) ID for the Entra app registration.', 'marthrown-enquiry-hub' ),
-			),
-			SourceEmail::OPT_CLIENT  => array(
-				'label'    => __( 'Client ID', 'marthrown-enquiry-hub' ),
-				'callback' => 'render_text_field',
-				'desc'     => __( 'Application (client) ID of the app registration.', 'marthrown-enquiry-hub' ),
-			),
-			SourceEmail::OPT_SECRET  => array(
-				'label'    => __( 'Client Secret', 'marthrown-enquiry-hub' ),
-				'callback' => 'render_secret_field',
-				'desc'     => __( 'Client secret value. Stored server-side and never displayed after saving.', 'marthrown-enquiry-hub' ),
-			),
-			SourceEmail::OPT_MAILBOX => array(
-				'label'    => __( 'Mailbox', 'marthrown-enquiry-hub' ),
-				'callback' => 'render_text_field',
-				'desc'     => __( 'Mailbox to poll, e.g. enquiries@example.com (UPN or email).', 'marthrown-enquiry-hub' ),
-			),
-			SourceEmail::OPT_FOLDER  => array(
-				'label'    => __( 'Mail folder', 'marthrown-enquiry-hub' ),
-				'callback' => 'render_text_field',
-				'desc'     => __( 'Folder to poll for unread messages. Use a well-known name like "inbox" or a folder ID.', 'marthrown-enquiry-hub' ),
-			),
-		);
-
-		foreach ( $fields as $option => $field ) {
-			add_settings_field(
+	/**
+	 * Register the Enquiries section.
+	 */
+	public static function register_enquiry_settings() {
+		foreach ( array( self::OPT_ENQUIRY_LIST, self::OPT_ENQUIRY_TAG ) as $option ) {
+			register_setting(
+				self::OPTION_GROUP,
 				$option,
-				$field['label'],
-				array( __CLASS__, $field['callback'] ),
-				self::MENU_SLUG,
-				'meh_graph_section',
 				array(
-					'label_for'   => $option,
-					'description' => $field['desc'],
+					'type'              => 'integer',
+					'sanitize_callback' => 'absint',
+					'default'           => 0,
 				)
 			);
 		}
 
-		self::register_bookings_settings();
-		self::register_access_settings();
+		add_settings_section(
+			'meh_enquiries_section',
+			__( 'Enquiries', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_enquiries_section_intro' ),
+			self::MENU_SLUG
+		);
+
+		add_settings_field(
+			self::OPT_ENQUIRY_LIST,
+			__( 'Event Enquiries list', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_list_select' ),
+			self::MENU_SLUG,
+			'meh_enquiries_section',
+			array(
+				'label_for'   => self::OPT_ENQUIRY_LIST,
+				'description' => __( 'FluentCRM list your enquiry form adds contacts to.', 'marthrown-enquiry-hub' ),
+			)
+		);
+
+		add_settings_field(
+			self::OPT_ENQUIRY_TAG,
+			__( 'Event Enquiry tag', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_tag_select' ),
+			self::MENU_SLUG,
+			'meh_enquiries_section',
+			array(
+				'label_for'   => self::OPT_ENQUIRY_TAG,
+				'description' => __( 'FluentCRM tag applied by the enquiry form.', 'marthrown-enquiry-hub' ),
+			)
+		);
 	}
+
+	/**
+	 * Enquiries section intro.
+	 */
+	public static function render_enquiries_section_intro() {
+		echo '<p>' . esc_html__( 'FluentCRM is the source of record for event enquiries. Your website form should add the contact to this list and apply this tag; the hub reads those contacts. If both are set, a contact must match both to appear.', 'marthrown-enquiry-hub' ) . '</p>';
+	}
+
+	/**
+	 * Resolve the configured enquiry list id, falling back to title match.
+	 *
+	 * @return int
+	 */
+	public static function enquiry_list_id() {
+		$saved = (int) get_option( self::OPT_ENQUIRY_LIST, 0 );
+		if ( $saved ) {
+			return $saved;
+		}
+		return self::find_by_title( 'lists', self::DEFAULT_LIST_TITLE );
+	}
+
+	/**
+	 * Resolve the configured enquiry tag id, falling back to title match.
+	 *
+	 * @return int
+	 */
+	public static function enquiry_tag_id() {
+		$saved = (int) get_option( self::OPT_ENQUIRY_TAG, 0 );
+		if ( $saved ) {
+			return $saved;
+		}
+		return self::find_by_title( 'tags', self::DEFAULT_TAG_TITLE );
+	}
+
+	/**
+	 * Find a FluentCRM list/tag id by title.
+	 *
+	 * @param string $type  'lists' or 'tags'.
+	 * @param string $title Title to match.
+	 * @return int 0 when not found.
+	 */
+	protected static function find_by_title( $type, $title ) {
+		foreach ( self::taxonomy_options( $type ) as $id => $label ) {
+			if ( strtolower( $label ) === strtolower( $title ) ) {
+				return (int) $id;
+			}
+		}
+		return 0;
+	}
+
+	/**
+	 * FluentCRM lists or tags as id => title.
+	 *
+	 * @param string $type 'lists' or 'tags'.
+	 * @return array
+	 */
+	protected static function taxonomy_options( $type ) {
+		$class = ( 'lists' === $type )
+			? '\FluentCrm\App\Models\Lists'
+			: '\FluentCrm\App\Models\Tag';
+
+		if ( ! class_exists( $class ) ) {
+			return array();
+		}
+
+		$out = array();
+		foreach ( $class::orderBy( 'title', 'asc' )->get() as $item ) {
+			$out[ (int) $item->id ] = (string) $item->title;
+		}
+		return $out;
+	}
+
+	/**
+	 * Render the list picker.
+	 *
+	 * @param array $args Field args.
+	 */
+	public static function render_list_select( $args ) {
+		self::render_taxonomy_select( $args, 'lists', self::enquiry_list_id() );
+	}
+
+	/**
+	 * Render the tag picker.
+	 *
+	 * @param array $args Field args.
+	 */
+	public static function render_tag_select( $args ) {
+		self::render_taxonomy_select( $args, 'tags', self::enquiry_tag_id() );
+	}
+
+	/**
+	 * Render a FluentCRM list/tag <select>.
+	 *
+	 * @param array  $args     Field args (label_for, description).
+	 * @param string $type     'lists' or 'tags'.
+	 * @param int    $selected Currently selected id.
+	 */
+	protected static function render_taxonomy_select( $args, $type, $selected ) {
+		$option  = $args['label_for'];
+		$options = self::taxonomy_options( $type );
+
+		if ( empty( $options ) ) {
+			echo '<p class="description">' . esc_html__( 'FluentCRM was not detected, so nothing can be listed here.', 'marthrown-enquiry-hub' ) . '</p>';
+			return;
+		}
+
+		echo '<select id="' . esc_attr( $option ) . '" name="' . esc_attr( $option ) . '">';
+		echo '<option value="0">' . esc_html__( '— None —', 'marthrown-enquiry-hub' ) . '</option>';
+		foreach ( $options as $id => $label ) {
+			printf(
+				'<option value="%1$d" %2$s>%3$s</option>',
+				(int) $id,
+				selected( $selected, $id, false ),
+				esc_html( $label )
+			);
+		}
+		echo '</select>';
+
+		if ( ! empty( $args['description'] ) ) {
+			printf( '<p class="description">%s</p>', esc_html( $args['description'] ) );
+		}
+
+		if ( ! get_option( $option ) && $selected ) {
+			echo '<p class="description">' . esc_html__( 'Auto-detected by name; save to lock it in.', 'marthrown-enquiry-hub' ) . '</p>';
+		}
+	}
+
+	/*
+	 * ---------------------------------------------------------------------
+	 * Bookings.
+	 * ---------------------------------------------------------------------
+	 */
+
+	/**
+	 * Register the Bookings settings section.
+	 */
+	public static function register_bookings_settings() {
+		register_setting(
+			self::OPTION_GROUP,
+			'meh_guest_name_field',
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
+				'default'           => '',
+			)
+		);
+		register_setting(
+			self::OPTION_GROUP,
+			'meh_guest_email_field',
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
+				'default'           => '',
+			)
+		);
+		register_setting(
+			self::OPTION_GROUP,
+			'meh_event_enquiry_calendar',
+			array(
+				'type'              => 'integer',
+				'sanitize_callback' => 'absint',
+				'default'           => 0,
+			)
+		);
+
+		add_settings_section(
+			'meh_bookings_section',
+			__( 'Bookings', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_bookings_section_intro' ),
+			self::MENU_SLUG
+		);
+
+		add_settings_field(
+			'meh_guest_name_field',
+			__( 'Guest name field', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_text_field' ),
+			self::MENU_SLUG,
+			'meh_bookings_section',
+			array(
+				'label_for'   => 'meh_guest_name_field',
+				'description' => __( 'Booking form field label (or field ID) holding the guest name.', 'marthrown-enquiry-hub' ),
+			)
+		);
+		add_settings_field(
+			'meh_guest_email_field',
+			__( 'Guest email field', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_text_field' ),
+			self::MENU_SLUG,
+			'meh_bookings_section',
+			array(
+				'label_for'   => 'meh_guest_email_field',
+				'description' => __( 'Booking form field label (or field ID) holding the guest email.', 'marthrown-enquiry-hub' ),
+			)
+		);
+		add_settings_field(
+			'meh_event_enquiry_calendar',
+			__( 'Event Enquiry calendar', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_calendar_select' ),
+			self::MENU_SLUG,
+			'meh_bookings_section',
+			array(
+				'label_for'   => 'meh_event_enquiry_calendar',
+				'description' => __( 'Optional. Bookings on this calendar are treated as provisional enquiry holds and get a "Convert to booking" action.', 'marthrown-enquiry-hub' ),
+			)
+		);
+	}
+
+	/**
+	 * Bookings section intro.
+	 */
+	public static function render_bookings_section_intro() {
+		echo '<p>' . esc_html__( 'Map WP Booking System form fields to the guest name/email shown in the hub.', 'marthrown-enquiry-hub' ) . '</p>';
+	}
+
+	/**
+	 * Render a calendar <select> bound to an option.
+	 *
+	 * @param array $args Field args (label_for, description).
+	 */
+	public static function render_calendar_select( $args ) {
+		$option    = $args['label_for'];
+		$value     = (int) get_option( $option, 0 );
+		$calendars = function_exists( 'wpbs_get_calendars' ) ? wpbs_get_calendars() : array();
+
+		echo '<select id="' . esc_attr( $option ) . '" name="' . esc_attr( $option ) . '">';
+		echo '<option value="0">' . esc_html__( '— None —', 'marthrown-enquiry-hub' ) . '</option>';
+		foreach ( $calendars as $calendar ) {
+			$id   = (int) $calendar->get( 'id' );
+			$name = method_exists( $calendar, 'get_name' ) ? $calendar->get_name() : $calendar->get( 'name' );
+			printf(
+				'<option value="%1$d" %2$s>%3$s</option>',
+				$id,
+				selected( $value, $id, false ),
+				esc_html( $name )
+			);
+		}
+		echo '</select>';
+
+		if ( ! empty( $args['description'] ) ) {
+			printf( '<p class="description">%s</p>', esc_html( $args['description'] ) );
+		}
+	}
+
+	/*
+	 * ---------------------------------------------------------------------
+	 * Access.
+	 * ---------------------------------------------------------------------
+	 */
 
 	/**
 	 * Register the Access section — which roles may use the hub.
@@ -238,7 +456,6 @@ class Settings {
 			}
 		}
 
-		// Administrators must always retain access.
 		if ( ! in_array( 'administrator', $out, true ) ) {
 			$out[] = 'administrator';
 		}
@@ -246,119 +463,9 @@ class Settings {
 		return array_values( array_unique( $out ) );
 	}
 
-	/**
-	 * Register the Bookings settings section (guest fields + enquiry calendar).
-	 */
-	public static function register_bookings_settings() {
-		register_setting(
-			self::OPTION_GROUP,
-			'meh_guest_name_field',
-			array(
-				'type'              => 'string',
-				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
-				'default'           => '',
-			)
-		);
-		register_setting(
-			self::OPTION_GROUP,
-			'meh_guest_email_field',
-			array(
-				'type'              => 'string',
-				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
-				'default'           => '',
-			)
-		);
-		register_setting(
-			self::OPTION_GROUP,
-			'meh_event_enquiry_calendar',
-			array(
-				'type'              => 'integer',
-				'sanitize_callback' => 'absint',
-				'default'           => 0,
-			)
-		);
-
-		add_settings_section(
-			'meh_bookings_section',
-			__( 'Bookings', 'marthrown-enquiry-hub' ),
-			array( __CLASS__, 'render_bookings_section_intro' ),
-			self::MENU_SLUG
-		);
-
-		add_settings_field(
-			'meh_guest_name_field',
-			__( 'Guest name field', 'marthrown-enquiry-hub' ),
-			array( __CLASS__, 'render_text_field' ),
-			self::MENU_SLUG,
-			'meh_bookings_section',
-			array(
-				'label_for'   => 'meh_guest_name_field',
-				'description' => __( 'Booking form field label (or field ID) holding the guest name.', 'marthrown-enquiry-hub' ),
-			)
-		);
-		add_settings_field(
-			'meh_guest_email_field',
-			__( 'Guest email field', 'marthrown-enquiry-hub' ),
-			array( __CLASS__, 'render_text_field' ),
-			self::MENU_SLUG,
-			'meh_bookings_section',
-			array(
-				'label_for'   => 'meh_guest_email_field',
-				'description' => __( 'Booking form field label (or field ID) holding the guest email.', 'marthrown-enquiry-hub' ),
-			)
-		);
-		add_settings_field(
-			'meh_event_enquiry_calendar',
-			__( 'Event Enquiry calendar', 'marthrown-enquiry-hub' ),
-			array( __CLASS__, 'render_calendar_select' ),
-			self::MENU_SLUG,
-			'meh_bookings_section',
-			array(
-				'label_for'   => 'meh_event_enquiry_calendar',
-				'description' => __( 'Website enquiries arrive as bookings on this calendar. Bookings here get a "Convert to booking" action.', 'marthrown-enquiry-hub' ),
-			)
-		);
-	}
-
-	/**
-	 * Bookings section intro.
-	 */
-	public static function render_bookings_section_intro() {
-		echo '<p>' . esc_html__( 'Map WP Booking System form fields to the guest name/email shown in the hub, and identify the Event Enquiry calendar.', 'marthrown-enquiry-hub' ) . '</p>';
-	}
-
-	/**
-	 * Render a calendar <select> bound to an option.
-	 *
-	 * @param array $args Field args (label_for, description).
-	 */
-	public static function render_calendar_select( $args ) {
-		$option   = $args['label_for'];
-		$value    = (int) get_option( $option, 0 );
-		$calendars = function_exists( 'wpbs_get_calendars' ) ? wpbs_get_calendars() : array();
-
-		echo '<select id="' . esc_attr( $option ) . '" name="' . esc_attr( $option ) . '">';
-		echo '<option value="0">' . esc_html__( '— None —', 'marthrown-enquiry-hub' ) . '</option>';
-		foreach ( $calendars as $calendar ) {
-			$id   = (int) $calendar->get( 'id' );
-			$name = method_exists( $calendar, 'get_name' ) ? $calendar->get_name() : $calendar->get( 'name' );
-			printf(
-				'<option value="%1$d" %2$s>%3$s</option>',
-				$id,
-				selected( $value, $id, false ),
-				esc_html( $name )
-			);
-		}
-		echo '</select>';
-
-		if ( ! empty( $args['description'] ) ) {
-			printf( '<p class="description">%s</p>', esc_html( $args['description'] ) );
-		}
-	}
-
 	/*
 	 * ---------------------------------------------------------------------
-	 * Sanitizers.
+	 * Shared renderers.
 	 * ---------------------------------------------------------------------
 	 */
 
@@ -370,124 +477,6 @@ class Settings {
 	 */
 	public static function sanitize_text( $value ) {
 		return sanitize_text_field( (string) $value );
-	}
-
-	/**
-	 * Mailbox sanitizer (email address).
-	 *
-	 * @param string $value Raw value.
-	 * @return string
-	 */
-	public static function sanitize_mailbox( $value ) {
-		$value = sanitize_text_field( (string) $value );
-		if ( $value && ! is_email( $value ) ) {
-			add_settings_error(
-				SourceEmail::OPT_MAILBOX,
-				'meh_invalid_mailbox',
-				__( 'The mailbox must be a valid email address.', 'marthrown-enquiry-hub' )
-			);
-			return (string) get_option( SourceEmail::OPT_MAILBOX, '' );
-		}
-		return $value;
-	}
-
-	/**
-	 * Secret sanitizer.
-	 *
-	 * Keeps the existing stored secret when the mask (or an empty value) is
-	 * submitted, so the field never has to render the real value.
-	 *
-	 * @param string $value Raw value.
-	 * @return string
-	 */
-	public static function sanitize_secret( $value ) {
-		$value = trim( (string) $value );
-
-		if ( '' === $value || self::SECRET_MASK === $value ) {
-			return (string) get_option( SourceEmail::OPT_SECRET, '' );
-		}
-
-		return self::encode_secret( sanitize_text_field( $value ) );
-	}
-
-	/*
-	 * ---------------------------------------------------------------------
-	 * Secret storage helpers.
-	 *
-	 * The secret is lightly obfuscated at rest using AUTH_KEY as an XOR pad so
-	 * it is not stored as plain text. This is obfuscation, not strong crypto —
-	 * treat database access as sensitive regardless.
-	 * ---------------------------------------------------------------------
-	 */
-
-	/**
-	 * Retrieve the decoded secret for use by the Graph client.
-	 *
-	 * @return string
-	 */
-	public static function get_secret() {
-		$stored = get_option( SourceEmail::OPT_SECRET, '' );
-		return $stored ? self::decode_secret( $stored ) : '';
-	}
-
-	/**
-	 * Obfuscate a secret for storage.
-	 *
-	 * @param string $plain Plain secret.
-	 * @return string
-	 */
-	protected static function encode_secret( $plain ) {
-		if ( ! defined( 'AUTH_KEY' ) || ! AUTH_KEY ) {
-			return $plain;
-		}
-		return 'meh1:' . base64_encode( self::xor_cipher( $plain, AUTH_KEY ) );
-	}
-
-	/**
-	 * Reverse encode_secret().
-	 *
-	 * @param string $stored Stored value.
-	 * @return string
-	 */
-	protected static function decode_secret( $stored ) {
-		if ( 0 !== strpos( $stored, 'meh1:' ) ) {
-			return $stored;
-		}
-		if ( ! defined( 'AUTH_KEY' ) || ! AUTH_KEY ) {
-			return '';
-		}
-		$raw = base64_decode( substr( $stored, 5 ), true );
-		return false === $raw ? '' : self::xor_cipher( $raw, AUTH_KEY );
-	}
-
-	/**
-	 * Symmetric XOR cipher.
-	 *
-	 * @param string $data Input bytes.
-	 * @param string $key  Key bytes.
-	 * @return string
-	 */
-	protected static function xor_cipher( $data, $key ) {
-		$out     = '';
-		$key_len = strlen( $key );
-		$len     = strlen( $data );
-		for ( $i = 0; $i < $len; $i++ ) {
-			$out .= $data[ $i ] ^ $key[ $i % $key_len ];
-		}
-		return $out;
-	}
-
-	/*
-	 * ---------------------------------------------------------------------
-	 * Renderers.
-	 * ---------------------------------------------------------------------
-	 */
-
-	/**
-	 * Section intro copy.
-	 */
-	public static function render_graph_section_intro() {
-		echo '<p>' . esc_html__( 'Credentials for the Entra (Azure AD) app registration used to poll a mailbox for incoming enquiries. The app needs the Mail.Read (and Mail.ReadWrite to mark messages read) application permission with admin consent.', 'marthrown-enquiry-hub' ) . '</p>';
 	}
 
 	/**
@@ -509,53 +498,23 @@ class Settings {
 	}
 
 	/**
-	 * Render the secret field with a masked placeholder.
-	 *
-	 * @param array $args Field args.
-	 */
-	public static function render_secret_field( $args ) {
-		$option    = $args['label_for'];
-		$has_value = (bool) get_option( $option, '' );
-
-		printf(
-			'<input type="password" id="%1$s" name="%1$s" value="%2$s" class="regular-text" autocomplete="new-password" />',
-			esc_attr( $option ),
-			$has_value ? esc_attr( self::SECRET_MASK ) : ''
-		);
-		if ( ! empty( $args['description'] ) ) {
-			printf( '<p class="description">%s</p>', esc_html( $args['description'] ) );
-		}
-		if ( $has_value ) {
-			echo '<p class="description">' . esc_html__( 'A secret is saved. Leave the masked value to keep it, or type a new one to replace it.', 'marthrown-enquiry-hub' ) . '</p>';
-		}
-	}
-
-	/**
 	 * Render the settings page shell.
 	 */
 	public static function render_page() {
 		if ( ! current_user_can( self::CAPABILITY ) ) {
 			return;
 		}
-
-		$last_poll = get_option( SourceEmail::OPT_LAST_POLL, '' );
 		?>
 		<div class="wrap meh-settings-wrap">
 			<h1><?php esc_html_e( 'Enquiry Hub Settings', 'marthrown-enquiry-hub' ); ?></h1>
 
 			<?php settings_errors(); ?>
 
-			<?php if ( $last_poll ) : ?>
-				<p class="description">
-					<?php
-					printf(
-						/* translators: %s: date/time of last mailbox poll */
-						esc_html__( 'Last mailbox poll: %s', 'marthrown-enquiry-hub' ),
-						esc_html( $last_poll )
-					);
-					?>
-				</p>
-			<?php endif; ?>
+			<p>
+				<a href="<?php echo esc_url( home_url( '/' . FrontendBookings::ROUTE . '/' ) ); ?>">
+					<?php esc_html_e( 'Open the Enquiry Hub', 'marthrown-enquiry-hub' ); ?>
+				</a>
+			</p>
 
 			<form action="options.php" method="post">
 				<?php
