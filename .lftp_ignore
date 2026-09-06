@@ -25,3 +25,6 @@ phpunit.xml
 .phpunit.result.cache
 .wp-env.json
 coverage/
+
+# Spec documents (requirements, design, tasks) — dev only, never deployed.
+.kiro/
