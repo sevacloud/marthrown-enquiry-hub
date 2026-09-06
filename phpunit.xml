@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+	Two suites, deliberately separate:
+
+	  pure       — tests that touch no WordPress function and no database.
+	               Runnable with a bare PHP + Composer install.
+	  wordpress  — tests that need a real WordPress and a real MySQL. Run these
+	               inside wp-env (`npm run test:php`), which supplies the
+	               WordPress PHPUnit test library.
+-->
+<phpunit
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+	bootstrap="tests/bootstrap.php"
+	colors="true"
+	cacheResultFile=".phpunit.result.cache"
+	convertDeprecationsToExceptions="false"
+	beStrictAboutTestsThatDoNotTestAnything="false"
+	failOnWarning="true"
+	failOnRisky="true"
+>
+	<testsuites>
+		<testsuite name="pure">
+			<directory suffix="Test.php">tests/pure</directory>
+		</testsuite>
+		<testsuite name="wordpress">
+			<directory suffix="Test.php">tests/wordpress</directory>
+		</testsuite>
+	</testsuites>
+
+	<coverage>
+		<include>
+			<directory suffix=".php">includes</directory>
+		</include>
+	</coverage>
+
+	<php>
+		<const name="WP_TESTS_MULTISITE" value="0"/>
+	</php>
+</phpunit>

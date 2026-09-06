@@ -7,8 +7,9 @@
  * (pending/accepted/trash), start/end dates, stay length, calendar name.
  *
  * Calendar-overview/placeholder reading lives in CalendarReader; booking
- * creation/conversion lives in BookingConverter. Both reuse the public helpers
- * here so WPBS field/normalize/legend logic has a single home.
+ * creation lives in BookingCreator. Both reuse the public helpers here —
+ * field/normalize, legend lookup and date blocking — so WPBS logic has a
+ * single home.
  *
  * @package MarthrownEnquiryHub
  */
@@ -362,6 +363,63 @@ class SourceWpbs {
 			);
 		}
 		return $map;
+	}
+
+	/**
+	 * Find a calendar's "booked" (full-day block) legend item id.
+	 *
+	 * @param int $calendar_id Calendar id.
+	 * @return int 0 when the calendar has no booked legend item.
+	 */
+	public static function booked_legend_item( $calendar_id ) {
+		foreach ( self::legend_items_map( $calendar_id ) as $id => $li ) {
+			if ( 'booked' === $li['auto_pending'] ) {
+				return (int) $id;
+			}
+		}
+		return 0;
+	}
+
+	/**
+	 * Insert availability events across a booking's date range using the
+	 * calendar's "booked" legend item, one event per day inclusive.
+	 *
+	 * @param int    $calendar_id Calendar id.
+	 * @param int    $booking_id  Booking id.
+	 * @param string $start       Start date or datetime.
+	 * @param string $end         End date or datetime.
+	 * @return int Number of days blocked; 0 when nothing could be blocked.
+	 */
+	public static function block_dates( $calendar_id, $booking_id, $start, $end ) {
+		if ( ! function_exists( 'wpbs_insert_event' ) ) {
+			return 0;
+		}
+		$legend_id = self::booked_legend_item( $calendar_id );
+		if ( ! $legend_id ) {
+			return 0;
+		}
+		$s = strtotime( gmdate( 'Y-m-d', strtotime( (string) $start ) ) );
+		$e = strtotime( gmdate( 'Y-m-d', strtotime( (string) $end ) ) );
+		if ( ! $s || ! $e || $e < $s ) {
+			return 0;
+		}
+
+		$blocked = 0;
+		for ( $t = $s; $t <= $e; $t += DAY_IN_SECONDS ) {
+			wpbs_insert_event(
+				array(
+					'date_year'      => (int) gmdate( 'Y', $t ),
+					'date_month'     => (int) gmdate( 'n', $t ),
+					'date_day'       => (int) gmdate( 'j', $t ),
+					'calendar_id'    => (int) $calendar_id,
+					'booking_id'     => (int) $booking_id,
+					'legend_item_id' => (int) $legend_id,
+				)
+			);
+			++$blocked;
+		}
+
+		return $blocked;
 	}
 
 	/**

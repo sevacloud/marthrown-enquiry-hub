@@ -12,6 +12,9 @@ meh-environment.php
 /node_modules/
 /build/
 
+# Test artefacts
+.phpunit.result.cache
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db

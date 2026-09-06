@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Marthrown Enquiry Hub
  * Plugin URI:        https://github.com/marthrown/marthrown-enquiry-hub
- * Description:        Unified hub to manage WP Booking System bookings (current, upcoming, past) and event enquiries. FluentCRM Pro is the source of record for enquiries: a website form adds contacts to the "Event Enquiries" list with the "Event Enquiry" tag, and the hub reads them from there.
+ * Description:        Unified hub to manage WP Booking System bookings (current, upcoming, past) and event enquiries. The plugin owns its enquiry tables: the website form posts to the intake webhook, the hub stores and works the enquiry, and FluentCRM Pro — when present — is linked to as the contact record.
  * Version:           0.3.0
  * Author:            Liamarjit @ Seva Cloud
  * License:           GPL-2.0-or-later
@@ -29,6 +29,13 @@ define( 'MEH_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MEH_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
 define( 'MEH_INCLUDES_DIR', MEH_PLUGIN_DIR . 'includes/' );
 
+/*
+ * Enquiry Store schema version this build expects. Declared here so the version
+ * is readable before includes/ loads; `Schema::CURRENT_VERSION` is the value the
+ * schema manager itself compares against and the two are kept in step.
+ */
+define( 'MEH_DB_VERSION', 1 );
+
 // Prefix applied to FluentCRM records created by the staging copy so they can
 // be identified and removed before go-live.
 if ( ! defined( 'MEH_TEST_PREFIX' ) ) {
@@ -53,11 +60,13 @@ if ( file_exists( MEH_PLUGIN_DIR . 'meh-environment.php' ) ) {
 
 /*
  * -------------------------------------------------------------------------
- * Dependency check: FluentCRM Pro must be active.
+ * Dependency check: FluentCRM Pro is optional.
  * -------------------------------------------------------------------------
  *
- * FluentCRM Pro is the source of record for enquiries, so the plugin will
- * not load its features unless the dependency is present and active.
+ * The Enquiry Store owns enquiries, so intake, storage, the lifecycle and the
+ * REST surface all load whether or not FluentCRM Pro is present
+ * (Requirement 16.8). FluentCRM is used for one thing only — linking an enquiry
+ * to a CRM contact — so its absence disables contact linkage and nothing else.
  */
 
 /**
@@ -117,19 +126,99 @@ function meh_is_staging() {
 
 /**
  * Render an admin notice when FluentCRM Pro is missing.
+ *
+ * A warning rather than an error, and scoped to what is actually unavailable:
+ * enquiries are still received, stored, listed and worked; only linkage of an
+ * enquiry to a CRM contact is disabled until FluentCRM Pro is back.
  */
 function meh_missing_dependency_notice() {
 	if ( ! current_user_can( 'activate_plugins' ) ) {
 		return;
 	}
 	?>
-	<div class="notice notice-error">
+	<div class="notice notice-warning">
 		<p>
 			<strong><?php esc_html_e( 'Marthrown Enquiry Hub', 'marthrown-enquiry-hub' ); ?></strong>
-			<?php esc_html_e( 'requires FluentCRM Pro to be installed and active. The plugin features are disabled until FluentCRM Pro is available.', 'marthrown-enquiry-hub' ); ?>
+			<?php esc_html_e( 'cannot find FluentCRM Pro, so contact linkage is disabled. Enquiries are still received and stored, and they will be linked to CRM contacts once FluentCRM Pro is active again.', 'marthrown-enquiry-hub' ); ?>
 		</p>
 	</div>
 	<?php
+}
+
+/*
+ * -------------------------------------------------------------------------
+ * Class loading
+ * -------------------------------------------------------------------------
+ */
+
+/**
+ * Load every plugin class.
+ *
+ * Shared by the bootstrap and by the activation and deactivation hooks, which
+ * run in requests where `plugins_loaded` has already been and gone.
+ *
+ * The order is not alphabetical and is not arbitrary. `class-enquiry-creator.php`
+ * has to be loaded before `class-intake-handler.php`, because the handler
+ * resolves its rejection-reason and history-entry constants from
+ * `EnquiryCreator` as its own class body is evaluated; loading it first would
+ * fatal on every intake request. Everything else resolves its collaborators at
+ * call time, so the remaining order is grouped for reading rather than forced.
+ *
+ * @return void
+ */
+function meh_require_includes() {
+	$files = array(
+		// Primitives every other class leans on.
+		'class-log.php',
+		'class-clock.php',
+		'class-auth.php',
+		'class-staging-marker.php',
+
+		// Storage.
+		'class-schema.php',
+		'class-enquiry-query.php',
+		'class-enquiry-store.php',
+
+		// Enquiry services.
+		'class-enquiry-validator.php',
+		'class-field-mapper.php',
+		'class-history-recorder.php',
+		'class-note-service.php',
+		'class-lifecycle.php',
+		'class-duplicate-detector.php',
+		'class-contact-linker.php',
+
+		// Intake. EnquiryCreator first: IntakeHandler reads its constants as the
+		// handler class body is evaluated.
+		'class-enquiry-creator.php',
+		'class-intake-handler.php',
+		'class-intake-endpoint.php',
+		'class-enquiry-editor.php',
+
+		// Scheduled work, booking creation and the one-off CRM migration.
+		'class-auto-close-job.php',
+		'class-booking-creator.php',
+		'class-migration-runner.php',
+
+		// Bookings data layer.
+		'class-source-wpbs.php',
+		'class-calendar-reader.php',
+
+		// REST API layer (the contract the React app consumes).
+		'class-rest-enquiries.php',
+		'class-rest-bookings.php',
+		'class-export-bookings.php',
+
+		// UI.
+		'class-settings.php',
+		'class-admin-page.php',
+		'class-wpbs-banner.php',
+		'class-frontend-bookings.php',
+	);
+
+	foreach ( $files as $file ) {
+		require_once MEH_INCLUDES_DIR . $file;
+	}
 }
 
 /*
@@ -141,19 +230,32 @@ function meh_missing_dependency_notice() {
 /**
  * Runs on plugin activation.
  *
- * Registers cron schedules and flushes as needed. We guard against a missing
- * dependency so activation never fatals; the admin notice will guide the user.
+ * Installs the Enquiry Store schema, schedules the daily auto-closure event and
+ * registers the /bookings rewrite. Nothing here depends on FluentCRM, so
+ * activation succeeds and the enquiry layer works with the dependency absent.
  */
 function meh_activate() {
 	// Retire cron events from earlier versions (email polling / WPBS sync).
 	meh_clear_legacy_cron();
 
+	meh_require_includes();
+
+	/*
+	 * Requirement 1.9: create every absent table, leave every present table and
+	 * every row within it alone, and record the current schema version.
+	 * `install()` is dbDelta()-based so it is safe over an existing schema;
+	 * `maybe_upgrade()` is what records the version, and returns immediately when
+	 * the stored version already matches.
+	 */
+	\MarthrownEnquiryHub\Schema::install();
+	\MarthrownEnquiryHub\Schema::maybe_upgrade();
+
+	// Requirement 8.1: one daily auto-closure event, not a second one.
+	\MarthrownEnquiryHub\AutoCloseJob::schedule();
+
 	// Register the /bookings rewrite rule before flushing so the pretty URL
 	// works immediately after activation.
-	require_once MEH_INCLUDES_DIR . 'class-frontend-bookings.php';
-	if ( class_exists( '\MarthrownEnquiryHub\FrontendBookings' ) ) {
-		\MarthrownEnquiryHub\FrontendBookings::add_rewrite();
-	}
+	\MarthrownEnquiryHub\FrontendBookings::add_rewrite();
 
 	// Store the version so we can run upgrade routines later.
 	update_option( 'meh_version', MEH_VERSION );
@@ -164,19 +266,30 @@ function meh_activate() {
 /**
  * Runs on plugin deactivation.
  *
- * Clears scheduled cron events so nothing lingers after deactivation.
+ * Clears every scheduled cron event the plugin owns — the daily auto-closure
+ * event and the two retired polling hooks — so nothing lingers. Every Enquiry
+ * Store table and every row within it is retained: deactivating, and
+ * uninstalling, destroys no enquiry data, which is why the plugin ships no
+ * `uninstall.php` (Requirement 1.14).
  */
 function meh_deactivate() {
 	meh_clear_legacy_cron();
+
+	meh_require_includes();
+
+	// Requirement 8.2.
+	\MarthrownEnquiryHub\AutoCloseJob::unschedule();
+
 	flush_rewrite_rules();
 }
 
 /**
  * Clear scheduled events from earlier versions.
  *
- * The plugin no longer runs any cron: enquiries are read live from FluentCRM and
- * bookings live from WP Booking System. These hooks are cleared so schedules
- * left over from the email-polling era don't linger.
+ * The email-polling and WPBS-sync events are gone for good, so both hooks are
+ * cleared on activation and on deactivation and any schedule left over from an
+ * earlier version of the plugin goes with them. The daily auto-closure event is
+ * not this function's business: `AutoCloseJob::unschedule()` owns it.
  */
 function meh_clear_legacy_cron() {
 	foreach ( array( 'meh_cron_email_poll', 'meh_cron_wpbs_poll' ) as $hook ) {
@@ -196,35 +309,25 @@ register_deactivation_hook( __FILE__, 'meh_deactivate' );
 /**
  * Load plugin includes and wire everything together.
  *
- * Only runs when FluentCRM Pro is active. Loaded on `plugins_loaded` so that
- * FluentCRM (and its Pro add-on) have had a chance to define their markers.
+ * Runs whether or not FluentCRM Pro is active: the enquiry layer owns its own
+ * storage, so intake, the lifecycle and the REST surface must work with the
+ * dependency absent (Requirement 16.8). A missing dependency only adds the
+ * admin notice.
+ *
+ * The schema upgrade runs here rather than only on activation because deployment
+ * is an SFTP file mirror — the plugin is never re-activated on deploy, so an
+ * activation-only migration would never run. `maybe_upgrade()` compares the
+ * stored version before touching `$wpdb` and returns without issuing a statement
+ * when it matches (Requirements 1.11, 1.17).
  */
 function meh_bootstrap() {
-	if ( ! meh_is_fluentcrm_pro_active() ) {
-		add_action( 'admin_notices', 'meh_missing_dependency_notice' );
-		return;
-	}
+	meh_require_includes();
 
-	// Shared services.
-	require_once MEH_INCLUDES_DIR . 'class-auth.php';
-
-	// Data layer: bookings from WPBS, enquiries from FluentCRM.
-	require_once MEH_INCLUDES_DIR . 'class-source-wpbs.php';
-	require_once MEH_INCLUDES_DIR . 'class-calendar-reader.php';
-	require_once MEH_INCLUDES_DIR . 'class-booking-converter.php';
-
-	// REST API layer (the contract the React app consumes).
-	require_once MEH_INCLUDES_DIR . 'class-rest-enquiries.php';
-	require_once MEH_INCLUDES_DIR . 'class-rest-bookings.php';
-	require_once MEH_INCLUDES_DIR . 'class-export-bookings.php';
-
-	// UI.
-	require_once MEH_INCLUDES_DIR . 'class-settings.php';
-	require_once MEH_INCLUDES_DIR . 'class-admin-page.php';
-	require_once MEH_INCLUDES_DIR . 'class-wpbs-banner.php';
-	require_once MEH_INCLUDES_DIR . 'class-frontend-bookings.php';
+	\MarthrownEnquiryHub\Schema::maybe_upgrade();
 
 	// Boot the pieces that register hooks.
+	\MarthrownEnquiryHub\IntakeEndpoint::init();
+	\MarthrownEnquiryHub\AutoCloseJob::init();
 	\MarthrownEnquiryHub\Settings::init();
 	\MarthrownEnquiryHub\RestEnquiries::init();
 	\MarthrownEnquiryHub\RestBookings::init();
@@ -232,5 +335,9 @@ function meh_bootstrap() {
 	\MarthrownEnquiryHub\AdminPage::init();
 	\MarthrownEnquiryHub\WpbsBanner::init();
 	\MarthrownEnquiryHub\FrontendBookings::init();
+
+	if ( ! meh_is_fluentcrm_pro_active() ) {
+		add_action( 'admin_notices', 'meh_missing_dependency_notice' );
+	}
 }
 add_action( 'plugins_loaded', 'meh_bootstrap' );

@@ -87,11 +87,12 @@
 	background: #f0f0f1;
 	color: #1d2327;
 
+	/* The six lifecycle statuses, plus the staging marker. */
 	&--new {
 		background: #fcf3d7;
 		color: #6b5411;
 	}
-	&--replied {
+	&--contacted {
 		background: #d7e8fb;
 		color: #0a4b78;
 	}
@@ -103,15 +104,75 @@
 		background: #d7f0dd;
 		color: #114a26;
 	}
+	&--lost {
+		background: #fbdada;
+		color: #8a1f1f;
+	}
 	&--closed {
 		background: #e6e6e8;
 		color: #50575e;
 	}
+	&--test {
+		background: #d63638;
+		color: #fff;
+		font-weight: 600;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+	}
+}
+
+.meh-row-open {
+	text-align: left;
+	font-weight: 600;
 }
 
 .meh-muted {
 	color: #646970;
 	font-size: 12px;
+}
+
+/* Status tabs with counts — the enquiry list and the bookings list share them. */
+
+.meh-period-tabs {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	margin: 10px 0 6px;
+}
+
+.meh-period-tab {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 12px;
+	background: #fff;
+	border: 1px solid #c3c4c7;
+	border-radius: 999px;
+	cursor: pointer;
+	font-size: 13px;
+
+	.count {
+		display: inline-block;
+		min-width: 18px;
+		padding: 0 5px;
+		border-radius: 999px;
+		background: #f0f0f1;
+		color: #50575e;
+		font-size: 11px;
+		text-align: center;
+	}
+
+	&.is-active {
+		background: #2271b1;
+		border-color: #2271b1;
+		color: #fff;
+		font-weight: 600;
+
+		.count {
+			background: rgba( 255, 255, 255, 0.25 );
+			color: #fff;
+		}
+	}
 }
 
 /* --- Bookings Manager (WPBS-style) --- */
@@ -131,48 +192,6 @@
 		.wpbs-page-heading {
 			font-size: 15px;
 			font-weight: 600;
-		}
-	}
-
-	.meh-period-tabs {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 6px;
-		margin: 10px 0 6px;
-	}
-
-	.meh-period-tab {
-		display: inline-flex;
-		align-items: center;
-		gap: 6px;
-		padding: 6px 12px;
-		background: #fff;
-		border: 1px solid #c3c4c7;
-		border-radius: 999px;
-		cursor: pointer;
-		font-size: 13px;
-
-		.count {
-			display: inline-block;
-			min-width: 18px;
-			padding: 0 5px;
-			border-radius: 999px;
-			background: #f0f0f1;
-			color: #50575e;
-			font-size: 11px;
-			text-align: center;
-		}
-
-		&.is-active {
-			background: #2271b1;
-			border-color: #2271b1;
-			color: #fff;
-			font-weight: 600;
-
-			.count {
-				background: rgba( 255, 255, 255, 0.25 );
-				color: #fff;
-			}
 		}
 	}
 
@@ -465,4 +484,191 @@
 
 .meh-convert-select {
 	max-width: 150px;
+}
+
+/* --- Enquiry form (create + edit) --- */
+
+.meh-form {
+	max-width: 520px;
+
+	&__title {
+		margin: 4px 0 12px;
+	}
+
+	&__field {
+		margin-bottom: 4px;
+	}
+
+	&__error {
+		margin: 2px 0 10px;
+		color: #d63638;
+		font-size: 12px;
+	}
+
+	&__required {
+		color: #646970;
+		font-weight: 400;
+		text-transform: none;
+	}
+
+	&__dates {
+		margin: 12px 0;
+		padding: 8px 12px 12px;
+		border: 1px solid #dcdcde;
+		border-radius: 4px;
+
+		legend {
+			font-size: 11px;
+			font-weight: 600;
+			text-transform: uppercase;
+			color: #1d2327;
+		}
+	}
+
+	&__date {
+		display: flex;
+		align-items: flex-end;
+		gap: 8px;
+		margin: 0 0 8px;
+	}
+
+	&__actions {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-top: 16px;
+	}
+}
+
+/* --- Enquiry detail panel --- */
+
+.meh-detail {
+	margin-top: 12px;
+	padding: 12px 16px 16px;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	background: #fff;
+
+	&__head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+
+		h3 {
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			margin: 0;
+		}
+	}
+
+	&__id {
+		color: #646970;
+		font-size: 12px;
+		font-weight: 400;
+	}
+
+	&__actions {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin: 12px 0;
+	}
+
+	&__convert {
+		display: flex;
+		align-items: flex-end;
+		flex-wrap: wrap;
+		gap: 8px;
+		margin: 0 0 12px;
+		padding: 8px 12px;
+		border: 1px solid #dcdcde;
+		border-radius: 4px;
+	}
+
+	&__grid {
+		display: grid;
+		grid-template-columns: minmax(120px, 180px) 1fr;
+		gap: 4px 16px;
+		margin: 0 0 12px;
+
+		dt {
+			font-size: 11px;
+			font-weight: 600;
+			text-transform: uppercase;
+			color: #1d2327;
+		}
+
+		dd {
+			display: flex;
+			align-items: center;
+			flex-wrap: wrap;
+			gap: 8px;
+			margin: 0;
+		}
+	}
+
+	&__crm-state {
+		font-weight: 600;
+	}
+
+	&__link {
+		white-space: nowrap;
+	}
+
+	&__section {
+		margin-top: 16px;
+
+		h4 {
+			margin: 0 0 6px;
+		}
+	}
+
+	&__message {
+		margin: 0;
+		white-space: pre-wrap;
+	}
+
+	&__note-add {
+		max-width: 520px;
+		margin-bottom: 12px;
+
+		.button {
+			margin-top: 6px;
+		}
+	}
+
+	&__list {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+
+		li {
+			padding: 6px 0;
+			border-bottom: 1px solid #f0f0f1;
+
+			p {
+				margin: 2px 0 0;
+				white-space: pre-wrap;
+			}
+		}
+	}
+
+	&__entry-type {
+		margin-left: 6px;
+		padding: 1px 6px;
+		border-radius: 10px;
+		font-size: 11px;
+		background: #f0f0f1;
+		color: #50575e;
+	}
+
+	&__changes {
+		margin: 4px 0 0;
+		padding-left: 18px;
+		color: #50575e;
+		font-size: 12px;
+	}
 }

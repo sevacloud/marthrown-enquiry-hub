@@ -46,7 +46,6 @@ PHP is a pure REST API layer; the UI is a React app built with
 | `POST /enquiries/{id}/status`         | Set workflow status (new/replied/quoted/converted/closed) |
 | `GET /bookings?status=…&s=&from=&to=&hide_past=` | Booking list, paginated, with status counts |
 | `GET /bookings/calendar?month=YYYY-MM` | Site-wide month overview (cached): bookings + placeholders |
-| `POST /bookings/{id}/convert`         | Convert an enquiry booking into a real booking |
 | `GET /calendars`                      | Calendar list for the pickers |
 
 CSV export is a separate nonce-protected `admin-post.php` action
@@ -142,7 +141,6 @@ marthrown-enquiry-hub/
 │   ├── class-auth.php               # shared role/permission checks
 │   ├── class-source-wpbs.php        # WPBS list-view reader + shared helpers
 │   ├── class-calendar-reader.php    # month overview + placeholders (cached)
-│   ├── class-booking-converter.php  # enquiry hold -> booking conversion
 │   ├── class-settings.php           # settings screen (enquiries/bookings/access)
 │   ├── class-rest-enquiries.php     # REST: enquiries (FluentCRM list + tag)
 │   ├── class-rest-bookings.php      # REST: bookings (WPBS list view)
@@ -171,6 +169,204 @@ CI runs `npm install && npm run build` before the SFTP deploy, and only the
 compiled `build/` ships (see `.lftp_ignore`). Commit a `package-lock.json` to
 switch CI to `npm ci` with dependency caching.
 
+## Testing
+
+PHP tests use PHPUnit with [Eris](https://github.com/giorgiosironi/eris) for
+property-based testing; JS tests use `wp-scripts test-unit-js` (Jest). Nothing
+test-related deploys — `vendor/`, `tests/`, `phpunit.xml`, `composer.json` and
+`.wp-env.json` are all in `.lftp_ignore`.
+
+### Two suites
+
+`phpunit.xml` declares two suites, and the split matters:
+
+| Suite | Needs | Covers |
+| --- | --- | --- |
+| `pure` | PHP + Composer only | Anything touching no WordPress function and no database: `Validator`, `EnquiryQuery`, `FieldMapper`, `Clock` |
+| `wordpress` | a WordPress checkout **and** a live MySQL/MariaDB | `Schema`, `EnquiryStore`, `HistoryRecorder`, `Lifecycle`, notes, intake, CRM linkage, REST routes |
+
+Run them with `npm run test:php:pure`, `npm run test:php:wp`, or `npm run
+test:php` for both.
+
+### Prerequisites
+
+**PHP 8.2** with `mbstring`, `openssl`, `curl`, `zip`, `mysqli` and `pdo_mysql`.
+On Windows, `winget install --id PHP.PHP.8.2 --scope user` works without
+administrator rights. One gotcha: the shipped `php.ini` leaves `extension_dir`
+commented out, so PHP falls back to its compiled-in default of `C:\php\ext` and
+**every** extension fails to load. Set it to an absolute path:
+
+```ini
+extension_dir = "C:/Users/<you>/AppData/Local/Microsoft/WinGet/Packages/PHP.PHP.8.2_Microsoft.Winget.Source_8wekyb3d8bbwe/ext"
+```
+
+`mbstring` is not optional — the validator's truncation and the history
+recorder both rely on `mb_strlen`/`mb_substr`.
+
+**Composer**, then install the dev dependencies:
+
+```
+composer install
+npm install
+```
+
+### Local route (no Docker)
+
+Preferred where Docker Desktop is unavailable, needs no administrator rights and
+no WSL. Three pieces: a WordPress checkout, a database, and two environment
+variables.
+
+**1. WordPress test library** — a shallow clone is enough:
+
+```
+git clone --depth 1 --branch trunk https://github.com/WordPress/wordpress-develop.git C:\Users\<you>\dev\wordpress-develop
+```
+
+Create `wordpress-develop/wp-tests-config.php` (copy
+`wp-tests-config-sample.php` and edit). It must define `ABSPATH` pointing at the
+checkout's `src/` directory, plus the database constants below. Values there are
+test-only — that database holds nothing real, so the salts can be any fixed
+strings.
+
+**2. MariaDB from the ZIP archive** — no installer, no service, no admin.
+Download `mariadb-<version>-winx64.zip`, verify its published SHA-256, unzip it,
+then initialise a data directory:
+
+```
+mysql_install_db.exe --datadir=C:\Users\<you>\dev\mariadb-data
+```
+
+Create the test database and a non-root user for it:
+
+```sql
+CREATE DATABASE meh_tests DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'meh_test'@'127.0.0.1' IDENTIFIED BY '<password>';
+GRANT ALL PRIVILEGES ON meh_tests.* TO 'meh_test'@'127.0.0.1';
+GRANT ALL PRIVILEGES ON `meh\_tests\_%`.* TO 'meh_test'@'127.0.0.1';
+```
+
+That second grant is what lets several PHPUnit processes run at once — see
+[One database per PHPUnit process](#one-database-per-phpunit-process).
+
+The server binds to `127.0.0.1` only and runs on port 3307, keeping it off the
+default port and unreachable from the network. It is a disposable test database:
+the WordPress test bootstrap drops and recreates its tables on every run, so
+never point these settings at anything you care about.
+
+**3. Environment variables** (user scope, no admin needed). All three have
+defaults, so a shell that never set them still works if your layout matches the
+one above:
+
+| Variable | Value | Default when unset |
+| --- | --- | --- |
+| `WP_TESTS_DIR` | `…\wordpress-develop\tests\phpunit` | `%USERPROFILE%\dev\wordpress-develop\tests\phpunit` |
+| `MEH_DB_DATA` | `…\mariadb-data` | `%USERPROFILE%\dev\mariadb-data` |
+| `MEH_DB_PORT` | `3307` | `3307` |
+
+Add the MariaDB `bin` directory to your PATH so `npm run db:start` resolves
+`mysqld`. `tests/bootstrap.php` reads `WP_TESTS_DIR` (falling back to
+`WP_PHPUNIT__DIR`, `/wordpress-phpunit`, `/tmp/wordpress-tests-lib` and the
+default above), so no code change is needed to switch between routes.
+`npm run db:start` and `npm run db:stop` go through `tests/db.js`, which fills in
+`MEH_DB_DATA` and `MEH_DB_PORT` the same way.
+
+Then, in two terminals:
+
+```
+npm run db:start      # leave running; Ctrl-C or `npm run db:stop` to halt
+npm run test:php
+```
+
+The WordPress bootstrap shells out to a `php` binary of its own, so **PHP must
+be on your PATH**, not just reachable by absolute path — an easy failure to
+misread, because it surfaces as `'php' is not recognized`.
+
+### Docker route
+
+`.wp-env.json` is configured, so if you have Docker Desktop and WSL2:
+
+```
+npm run env:start
+npm run test:php:wp-env
+```
+
+The per-run database applies here too, and the container's database user can
+create one. If a container ever refuses, run PHPUnit with `MEH_TESTS_DB_NAME` set
+to wp-env's own test database to fall back to sharing it.
+
+This needs administrator rights to install WSL2 and Docker Desktop, and on a
+corporate machine Docker Desktop may require a paid licence. The local route
+above exists to avoid that chain entirely.
+
+### One database per PHPUnit process
+
+The WordPress test library reinstalls WordPress on every invocation, and
+installing starts by dropping the core tables. Two PHPUnit processes pointed at
+one database therefore sabotage each other: the second process's install removes
+`wptests_options` from under the first, which surfaces as
+`Table 'meh_tests.wptests_options' doesn't exist` part-way through a run, or as a
+deadlock, in tests that pass perfectly well on their own.
+
+So each process gets its own database, `meh_tests_<pid>`, created empty before
+the install and dropped when the process exits. Nothing else changes: the table
+prefix stays `wptests_`, so the tests that take `$wpdb->prefix` and add a segment
+of their own are untouched, and so are the ones that swap in a fixed prefix like
+`mehfacts_` — two runs can use the same table names because they are in different
+databases.
+
+Two knobs, both rarely needed:
+
+| Variable | Effect |
+| --- | --- |
+| `MEH_TESTS_DB_NAME` | Use this database as-is. Neither created nor dropped. `MEH_TESTS_DB_NAME=meh_tests` restores the old single shared database, and with it the collisions above. |
+| `MEH_TESTS_RUN_ID` | Use this instead of the process id in the database name, for a CI matrix that would rather name its own. |
+
+The wiring is `tests/wp-tests-config.php`. `DB_NAME` is a constant, read both here
+and in the separate PHP process the library shells out to for the install, so it
+cannot be changed after the fact — that file defines it first, then defers to your
+own `wp-tests-config.php` for the credentials, `ABSPATH`, salts and prefix. Your
+config file needs no edit; `tests/bootstrap.php` passes its location along.
+
+If a run is killed outright, its database survives. They are harmless and named
+distinctly, but to sweep them up:
+
+```sql
+SHOW DATABASES LIKE 'meh\_tests\_%';
+```
+
+### Property-based testing
+
+The design defines 43 correctness properties, each with its own test task in the
+implementation plan. `tests/Generators.php` holds the shared Eris generators —
+valid enquiries, candidate date sets of 1 to 10, term sets of 0 to 20, values at
+exactly their stored capacity, `total_guests` boundaries of 1 and 10000, and an
+adversarial string set (`'`, `"`, `\`, `--`, `;`, `%`, `_`, `%s`, `%d`) used to
+prove every submitted value is bound rather than interpolated into SQL.
+
+`tests/fakes/` holds in-memory stand-ins for FluentCRM (`FakeCrm`) and WP
+Booking System (`FakeWpbs`), so the CRM and booking paths are testable with
+neither plugin installed. Both register their global function shims only when the
+real function is absent, so a test run inside a site that has them active still
+exercises the real API.
+
+**Eris API version.** Eris 0.14 exposes generators as static methods on
+`Eris\Generators` — `\Eris\Generators::choose( 1, 10 )`. Other versions expose
+namespaced *functions* instead, as `Eris\Generator\choose( 1, 10 )`. The two are
+not interchangeable and picking the wrong one breaks every call site at once, so
+`tests/pure/HarnessTest.php` pins it deliberately: if an Eris upgrade changes the
+API, that one test fails rather than every property test failing obscurely.
+
+Note also that `tests/Generators.php` declares a class called `Generators` of its
+own, so it cannot `use Eris\Generators` — the names collide. It refers to Eris
+by fully-qualified name for that reason.
+
+**Verifying WordPress-independence.** `npm run test:php` runs both suites in one
+PHPUnit process, and because the `wordpress` suite needs WordPress, WordPress
+ends up loaded for the whole run. Only `npm run test:php:pure` genuinely proves
+the pure code needs no WordPress — `tests/bootstrap.php` skips the WordPress boot
+entirely when that suite is named. Run the pure suite on its own before trusting
+that property.
+
 ## Enquiry intake
 
 The plugin does **not** capture enquiries itself — the website form does, and the
@@ -188,6 +384,52 @@ must match both to appear.
 There is **no cron and no email polling** — enquiries are read live from
 FluentCRM and bookings live from WP Booking System. Legacy cron events from the
 email-polling era are cleared on activation/deactivation.
+
+### Intake secret transport
+
+The intake endpoint accepts the Intake Secret two ways: the
+`X-MEH-Intake-Secret` request header (preferred) or a `meh_secret` query
+parameter on the destination URL (fallback). **The header transport is the one in
+use.**
+
+The Kadence Blocks Pro version installed on the live site cannot send a custom
+request header — its webhook Submit Action offers a destination URL and
+form-field-to-webhook mappings and nothing else — so the plugin attaches the
+header itself. Because the form and the plugin are on the same site, the webhook
+POST is a loopback request WordPress makes while handling the submission, and
+`IntakeEndpoint::attach_secret_header()` adds the header to it through
+`http_request_args`. The filter is registered in `IntakeEndpoint::init()` on
+`plugins_loaded`, well before form processing, so it is in place by the time
+Kadence calls `wp_remote_post()`.
+
+`http_request_args` fires for **every** outbound request WordPress makes, so the
+filter is scoped tightly: it attaches nothing unless the request is going to this
+site's own host and port *and* resolves to the intake route itself (compared
+against `IntakeEndpoint::url()`, handling both the pretty-permalink path and the
+`rest_route` query parameter). It attaches nothing when no secret is stored, and
+it never overwrites an `X-MEH-Intake-Secret` header the request already carries.
+
+The `meh_secret` query parameter remains supported as the fallback for a sender
+that is not on this site or that WordPress does not make the request for. It is
+the **weaker** transport: a secret in the request URL is written into server
+access logs, where a header is not — which is why the Settings screen states that
+next to the Intake Secret control (Requirement 16.15).
+
+**What an administrator configures on the form.** The Kadence webhook Submit
+Action needs two things and no secret:
+
+1. **Destination URL** — the intake endpoint, shown on **Settings → Enquiry Hub →
+   Intake** (typically `https://<site>/wp-json/marthrown-enquiry-hub/v1/intake`).
+   Leave the secret off the URL; the plugin supplies it in the header.
+2. **Field mappings** — one entry per form field. Payload field names are matched
+   to enquiry fields by label, ignoring case and separators, so a field labelled
+   "First Name" supplies `first_name` with nothing configured. Where a name does
+   not match, set the payload field explicitly in the Intake section's nine
+   mapping controls. Add one field holding the form's own identifier and name it
+   in **Form identifier field** so the enquiry's `source` records which form sent
+   it; without it the enquiry is recorded as `webhook:unidentified`.
+
+The Intake Secret itself is set once in Settings and never appears on the form.
 
 ### Enquiry workflow status
 

@@ -1,0 +1,213 @@
+/**
+ * EnquiryManager component tests.
+ *
+ * The list screen carries three things the API cannot be asked about: the tab
+ * set and its counts, the marker a staging record wears, and the state the
+ * hide-test toggle opens in. It also owns the entry point to manual creation,
+ * so the request that entry point produces is asserted here at the transport —
+ * the path, the method, and the exact set of keys in the body.
+ *
+ * **Validates: Requirements 12.9, 17.4, 17.6, 18.23**
+ */
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import apiFetch from '@wordpress/api-fetch';
+import { respondWith } from '../testing/apiFetchMock';
+import EnquiryManager from './EnquiryManager';
+
+jest.mock( '@wordpress/api-fetch', () => ( {
+	__esModule: true,
+	default: jest.fn(),
+} ) );
+
+/**
+ * The seven tabs, in order, with the counts the payload below implies.
+ *
+ * `contacted`, `converted`, `lost` and `closed` are absent from the payload's
+ * `counts`, so each has to read as zero rather than as nothing.
+ */
+const EXPECTED_TABS = [
+	[ 'All', '2' ],
+	[ 'New', '1' ],
+	[ 'Contacted', '0' ],
+	[ 'Quoted', '1' ],
+	[ 'Converted', '0' ],
+	[ 'Lost', '0' ],
+	[ 'Closed', '0' ],
+];
+
+/**
+ * One live enquiry and one staging enquiry.
+ */
+const LIST = {
+	items: [
+		{
+			id: 1,
+			first_name: 'Ada',
+			last_name: 'Lovelace',
+			email: 'ada@example.com',
+			phone: '',
+			selected_dates: [ '2026-05-01' ],
+			status: 'new',
+			is_test: false,
+			created_at: '2026-01-02 09:00:00',
+		},
+		{
+			id: 2,
+			first_name: 'Staging',
+			last_name: 'Rig',
+			email: 'rig@example.com',
+			phone: '',
+			selected_dates: [],
+			status: 'quoted',
+			is_test: true,
+			created_at: '2026-01-03 09:00:00',
+		},
+	],
+	counts: { all: 2, new: 1, quoted: 1 },
+	warnings: [],
+	page: 1,
+	per_page: 25,
+	total: 2,
+	total_pages: 1,
+};
+
+/**
+ * Render the list and wait for its first read to land.
+ *
+ * @param {Object} handlers Extra apiFetch handlers.
+ * @return {Promise<Object>} Render result.
+ */
+async function renderList( handlers = {} ) {
+	apiFetch.mockImplementation(
+		respondWith( {
+			'GET enquiries': () => LIST,
+			...handlers,
+		} )
+	);
+
+	const rendered = render( <EnquiryManager /> );
+
+	await waitFor( () =>
+		expect( screen.getByText( 'Ada Lovelace' ) ).toBeTruthy()
+	);
+
+	return rendered;
+}
+
+beforeEach( () => {
+	apiFetch.mockReset();
+} );
+
+describe( 'EnquiryManager', () => {
+	it( 'renders the six lifecycle statuses plus all, each with its count', async () => {
+		const { container } = await renderList();
+
+		const tabs = [ ...container.querySelectorAll( '.meh-period-tab' ) ].map(
+			( tab ) => [
+				tab.childNodes[ 0 ].textContent,
+				tab.querySelector( '.count' ).textContent,
+			]
+		);
+
+		expect( tabs ).toEqual( EXPECTED_TABS );
+	} );
+
+	it( 'badges the staging row and only the staging row', async () => {
+		const { container } = await renderList();
+
+		const badges = [
+			...container.querySelectorAll( '.meh-badge--test' ),
+		];
+
+		expect( badges ).toHaveLength( 1 );
+		expect( badges[ 0 ].textContent ).toBe( 'Test' );
+		expect( badges[ 0 ].closest( 'tr' ).textContent ).toContain(
+			'Staging Rig'
+		);
+	} );
+
+	it( 'opens with the hide-test toggle off, so staging rows are listed', async () => {
+		await renderList();
+
+		expect( screen.getByLabelText( 'Hide test enquiries' ).checked ).toBe(
+			false
+		);
+	} );
+
+	it( 'opens an empty create form from the new-enquiry control', async () => {
+		await renderList();
+
+		fireEvent.click( screen.getByRole( 'button', { name: 'New enquiry' } ) );
+
+		expect(
+			screen.getByRole( 'heading', { name: 'New enquiry' } )
+		).toBeTruthy();
+		expect(
+			screen.getByRole( 'button', { name: 'Create enquiry' } )
+		).toBeTruthy();
+
+		[
+			'First name',
+			'Last name',
+			'Email',
+			'Phone',
+			'Total guests',
+			'Event type',
+			'Site exclusivity',
+			'Message',
+			'Date 1',
+		].forEach( ( label ) => {
+			expect( screen.getByLabelText( label ).value ).toBe( '' );
+		} );
+	} );
+
+	it( 'posts the entered values to POST /enquiries, with no key for a blank optional field', async () => {
+		await renderList( {
+			'POST enquiries': ( options ) => ( { id: 3, ...options.data } ),
+		} );
+
+		fireEvent.click( screen.getByRole( 'button', { name: 'New enquiry' } ) );
+
+		fireEvent.change( screen.getByLabelText( 'First name' ), {
+			target: { value: 'Grace' },
+		} );
+		fireEvent.change( screen.getByLabelText( 'Last name' ), {
+			target: { value: 'Hopper' },
+		} );
+		fireEvent.change( screen.getByLabelText( 'Email' ), {
+			target: { value: 'grace@example.com' },
+		} );
+		fireEvent.change( screen.getByLabelText( 'Date 1' ), {
+			target: { value: '2026-06-01' },
+		} );
+
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'Create enquiry' } )
+		);
+
+		await waitFor( () => expect( postedBody() ).not.toBeNull() );
+
+		// The four fields that were filled in, and nothing standing in for the
+		// five that were left blank.
+		expect( postedBody() ).toEqual( {
+			first_name: 'Grace',
+			last_name: 'Hopper',
+			email: 'grace@example.com',
+			selected_dates: [ '2026-06-01' ],
+		} );
+	} );
+} );
+
+/**
+ * The body of the create request, or null when none was made.
+ *
+ * @return {Object|null} Request body.
+ */
+function postedBody() {
+	const call = apiFetch.mock.calls.find(
+		( [ options ] ) =>
+			'enquiries' === options.path && 'POST' === options.method
+	);
+
+	return call ? call[ 0 ].data : null;
+}
