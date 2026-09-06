@@ -26,8 +26,30 @@ body.meh-frontend {
 	justify-content: space-between;
 	gap: 12px 24px;
 	margin-bottom: 16px;
-	padding-bottom: 12px;
-	border-bottom: 1px solid #dcdcde;
+	/* Padding on all sides now the header carries a background of its own; the
+	   bottom border it used to be separated by is redundant against it. */
+	padding: 16px 20px;
+	background: #097464;
+	color: #fbfbff;
+}
+
+/* The active theme's stylesheet loads on this page and styles links too, so the
+   header sets its own link colour rather than inheriting one that was chosen
+   for a light background. Underlined because against a solid colour, colour
+   alone should not be what marks a link. */
+.meh-frontend-header a {
+	color: #fbfbff;
+	text-decoration: underline;
+}
+
+.meh-frontend-header a:hover,
+.meh-frontend-header a:focus {
+	color: #fbfbff;
+}
+
+.meh-frontend-header a:focus-visible {
+	outline: 2px solid #fbfbff;
+	outline-offset: 2px;
 }
 
 .meh-frontend-brand {
@@ -35,6 +57,7 @@ body.meh-frontend {
 	align-items: center;
 	gap: 14px;
 	min-width: 0;
+	color: #fbfbff;
 }
 
 /* Constrain whatever the theme's custom logo markup is. */

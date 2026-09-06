@@ -15,6 +15,9 @@ meh-environment.php
 # Test artefacts
 .phpunit.result.cache
 
+# Local CSS preview harness (open in a browser; never deployed).
+/header-preview.html
+
 # OS / editor cruft
 .DS_Store
 Thumbs.db
