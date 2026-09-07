@@ -326,6 +326,18 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 
 		$this->crm = FakeCrm::install();
 
+		// The vocabularies the Validator checks a submitted multi-select
+		// against, so every generated `event_type`/`site_exclusivity` value is
+		// one the manual creation route accepts.
+		foreach ( array_keys( Generators::VOCABULARIES ) as $taxonomy ) {
+			add_filter(
+				'meh_enquiry_terms_' . $taxonomy,
+				static function () use ( $taxonomy ) {
+					return Generators::vocabulary( $taxonomy );
+				}
+			);
+		}
+
 		// A server of this test's own, so the route table holds what this test
 		// registered and nothing a previous test left behind.
 		$this->original_server = $wp_rest_server;

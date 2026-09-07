@@ -395,7 +395,7 @@ class IntakeSecretHeaderTest extends WP_UnitTestCase {
 				),
 				array(
 					'label' => 'Site Exclusivity',
-					'value' => 'exclusive',
+					'value' => 'full site',
 				),
 				array(
 					'label' => 'Message',

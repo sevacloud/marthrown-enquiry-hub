@@ -157,7 +157,7 @@ class IntakeHandlerTest extends WP_UnitTestCase {
 
 		$this->assertSame( array( '2025-09-06', '2025-09-13' ), $enquiry['selected_dates'] );
 		$this->assertSame( array( 'wedding' ), $enquiry['event_type'] );
-		$this->assertSame( array( 'exclusive' ), $enquiry['site_exclusivity'] );
+		$this->assertSame( array( 'full site' ), $enquiry['site_exclusivity'] );
 
 		// Requirement 2.6: the snapshot is what arrived, labels and all.
 		$this->assertSame( $payload, $enquiry['payload'] );
@@ -335,7 +335,7 @@ class IntakeHandlerTest extends WP_UnitTestCase {
 			'Total Guests'     => '40',
 			'Selected Dates'   => array( '2025-09-06', '2025-09-13' ),
 			'Event Type'       => array( 'wedding' ),
-			'Site Exclusivity' => array( 'exclusive' ),
+			'Site Exclusivity' => array( 'full site' ),
 			'Message'          => 'Looking at the barn for a September wedding.',
 		);
 

@@ -170,6 +170,18 @@ class ContactLinkageResiliencePropertyTest extends WP_UnitTestCase {
 		update_option( 'meh_enquiry_list', 7 );
 		update_option( 'meh_enquiry_tag', 12 );
 
+		// The vocabularies the Validator checks a submitted multi-select
+		// against, so every generated `event_type`/`site_exclusivity` value is
+		// one either creation route accepts.
+		foreach ( array_keys( Generators::VOCABULARIES ) as $taxonomy ) {
+			add_filter(
+				'meh_enquiry_terms_' . $taxonomy,
+				static function () use ( $taxonomy ) {
+					return Generators::vocabulary( $taxonomy );
+				}
+			);
+		}
+
 		Clock::freeze( self::AT );
 	}
 

@@ -187,6 +187,18 @@ class StagingTestMarkingPropertyTest extends WP_UnitTestCase {
 		$this->drop_tables();
 		$this->assertTrue( Schema::install(), 'The fixture install should succeed.' );
 
+		// The vocabularies the Validator checks a submitted multi-select
+		// against, so every generated `event_type`/`site_exclusivity` value is
+		// one either creation route accepts.
+		foreach ( array_keys( Generators::VOCABULARIES ) as $taxonomy ) {
+			add_filter(
+				'meh_enquiry_terms_' . $taxonomy,
+				static function () use ( $taxonomy ) {
+					return Generators::vocabulary( $taxonomy );
+				}
+			);
+		}
+
 		$this->crm  = FakeCrm::install();
 		$this->wpbs = FakeWpbs::install();
 	}

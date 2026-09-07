@@ -275,7 +275,7 @@ class IntakeEndpointTest extends WP_UnitTestCase {
 		// same lists the flat body delivered directly.
 		$this->assertSame( array( '2025-09-06', '2025-09-13' ), $kadence['Selected Dates'] );
 		$this->assertSame( array( 'wedding' ), $kadence['Event Type'] );
-		$this->assertSame( array( 'exclusive' ), $kadence['Site Exclusivity'] );
+		$this->assertSame( array( 'full site' ), $kadence['Site Exclusivity'] );
 
 		$this->assertSame( $this->comparable( $generic ), $this->comparable( $kadence ) );
 	}
@@ -439,7 +439,7 @@ class IntakeEndpointTest extends WP_UnitTestCase {
 				),
 				array(
 					'label' => 'Site Exclusivity',
-					'value' => 'exclusive',
+					'value' => 'full site',
 				),
 				array(
 					'label' => 'Message',
@@ -464,7 +464,7 @@ class IntakeEndpointTest extends WP_UnitTestCase {
 			'Total Guests'     => '40',
 			'Selected Dates'   => array( '2025-09-06', '2025-09-13' ),
 			'Event Type'       => array( 'wedding' ),
-			'Site Exclusivity' => array( 'exclusive' ),
+			'Site Exclusivity' => array( 'full site' ),
 			'Message'          => 'Looking at the barn for a September wedding.',
 		);
 	}

@@ -261,6 +261,13 @@ class ContactRelinkPropertyTest extends WP_UnitTestCase {
 		$this->drop_tables();
 		$this->assertTrue( Schema::install(), 'The fixture install should succeed.' );
 
+		// This test's `event_type`/`site_exclusivity` values are sentinel-marked
+		// fixture strings, not drawn from a fixed vocabulary, so both taxonomies
+		// are left unconstrained for the length of this test.
+		foreach ( array( 'event_type', 'site_exclusivity' ) as $taxonomy ) {
+			add_filter( 'meh_enquiry_terms_' . $taxonomy, '__return_empty_array' );
+		}
+
 		$this->crm = FakeCrm::install();
 	}
 

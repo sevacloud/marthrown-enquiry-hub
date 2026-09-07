@@ -241,6 +241,18 @@ class IntakeAuthenticationPropertyTest extends WP_UnitTestCase {
 
 		Clock::freeze( self::NOW );
 
+		// The vocabularies the Validator checks a submitted multi-select
+		// against, so every generated `event_type`/`site_exclusivity` value is
+		// one the intake route accepts.
+		foreach ( array_keys( Generators::VOCABULARIES ) as $taxonomy ) {
+			add_filter(
+				'meh_enquiry_terms_' . $taxonomy,
+				static function () use ( $taxonomy ) {
+					return Generators::vocabulary( $taxonomy );
+				}
+			);
+		}
+
 		$this->seed_existing_rows();
 		$this->boot_rest_server();
 	}

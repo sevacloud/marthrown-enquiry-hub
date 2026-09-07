@@ -57,6 +57,8 @@ class Settings {
 	const OPT_INTAKE_SECRET       = IntakeEndpoint::SECRET_OPTION;
 	const OPT_INTAKE_SOURCE_FIELD = IntakeEndpoint::SOURCE_FIELD_OPTION;
 	const OPT_FIELD_MAP           = FieldMapper::OPTION;
+	const OPT_INTAKE_START_DATE   = IntakeEndpoint::START_DATE_FIELD_OPTION;
+	const OPT_INTAKE_END_DATE     = IntakeEndpoint::END_DATE_FIELD_OPTION;
 
 	/**
 	 * `admin-post.php` actions behind the two migration controls.
@@ -119,6 +121,7 @@ class Settings {
 	public static function register_settings() {
 		self::register_enquiry_settings();
 		self::register_intake_settings();
+		self::register_taxonomy_settings();
 		self::register_bookings_settings();
 		self::register_access_settings();
 	}
@@ -341,6 +344,24 @@ class Settings {
 				'default'           => array(),
 			)
 		);
+		register_setting(
+			self::OPTION_GROUP,
+			self::OPT_INTAKE_START_DATE,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
+				'default'           => '',
+			)
+		);
+		register_setting(
+			self::OPTION_GROUP,
+			self::OPT_INTAKE_END_DATE,
+			array(
+				'type'              => 'string',
+				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
+				'default'           => '',
+			)
+		);
 
 		add_settings_section(
 			'meh_intake_section',
@@ -367,6 +388,30 @@ class Settings {
 			array(
 				'label_for'   => self::OPT_INTAKE_SOURCE_FIELD,
 				'description' => __( 'Payload field holding the identifier of the sending form. Its value sets the enquiry source. Left unset, or absent from a payload, the enquiry is recorded as webhook:unidentified.', 'marthrown-enquiry-hub' ),
+			)
+		);
+
+		add_settings_field(
+			self::OPT_INTAKE_START_DATE,
+			__( 'Start date field', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_text_field' ),
+			self::MENU_SLUG,
+			'meh_intake_section',
+			array(
+				'label_for'   => self::OPT_INTAKE_START_DATE,
+				'description' => __( 'Payload field holding a start date, where the form sends a date range instead of a candidate date list. Every day from here to the end date becomes a candidate date. Leave both this and the end date field blank to keep sending selected_dates as a list.', 'marthrown-enquiry-hub' ),
+			)
+		);
+
+		add_settings_field(
+			self::OPT_INTAKE_END_DATE,
+			__( 'End date field', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_text_field' ),
+			self::MENU_SLUG,
+			'meh_intake_section',
+			array(
+				'label_for'   => self::OPT_INTAKE_END_DATE,
+				'description' => __( 'Payload field holding the end date of the range. Both this and the start date field must be set, and both must be present in a submission, for the range to expand.', 'marthrown-enquiry-hub' ),
 			)
 		);
 
@@ -566,6 +611,87 @@ class Settings {
 		}
 
 		return $out;
+	}
+
+	/*
+	 * ---------------------------------------------------------------------
+	 * Event Type vocabulary.
+	 * ---------------------------------------------------------------------
+	 */
+
+	/**
+	 * Register the Event Type section.
+	 *
+	 * Site Exclusivity has no section of its own: it is a fixed three-value
+	 * list (`EnquiryTaxonomies::SITE_EXCLUSIVITY`), nothing asked for it to be
+	 * editable, and there is nothing here for a control to bind to.
+	 */
+	public static function register_taxonomy_settings() {
+		register_setting(
+			self::OPTION_GROUP,
+			EnquiryTaxonomies::EVENT_TYPE_OPTION,
+			array(
+				'type'              => 'array',
+				'sanitize_callback' => array( EnquiryTaxonomies::class, 'sanitise_list' ),
+				'default'           => EnquiryTaxonomies::EVENT_TYPE_DEFAULTS,
+			)
+		);
+
+		add_settings_section(
+			'meh_taxonomy_section',
+			__( 'Event Type options', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_taxonomy_section_intro' ),
+			self::MENU_SLUG
+		);
+
+		add_settings_field(
+			EnquiryTaxonomies::EVENT_TYPE_OPTION,
+			__( 'Event Type list', 'marthrown-enquiry-hub' ),
+			array( __CLASS__, 'render_event_types_field' ),
+			self::MENU_SLUG,
+			'meh_taxonomy_section',
+			array( 'label_for' => EnquiryTaxonomies::EVENT_TYPE_OPTION )
+		);
+	}
+
+	/**
+	 * Event Type section intro.
+	 */
+	public static function render_taxonomy_section_intro() {
+		echo '<p>' . esc_html__( 'The Event Type list offered as a dropdown on the enquiry form. One value per line; a blank line is dropped.', 'marthrown-enquiry-hub' ) . '</p>';
+	}
+
+	/**
+	 * Render the Event Type list as a textarea, one value per line.
+	 *
+	 * A textarea rather than a repeatable list of text inputs: the list is
+	 * short, editing it as plain text is faster than adding and removing rows
+	 * one at a time, and `options.php` already submits it as a single string
+	 * that `sanitise_list()` (the registered `sanitize_callback`) splits on
+	 * line breaks.
+	 *
+	 * @param array $args Field args (label_for).
+	 */
+	public static function render_event_types_field( $args ) {
+		$option = isset( $args['label_for'] ) ? $args['label_for'] : EnquiryTaxonomies::EVENT_TYPE_OPTION;
+		$values = EnquiryTaxonomies::configured_event_types();
+
+		printf(
+			'<textarea id="%1$s" name="%1$s" rows="6" class="regular-text" spellcheck="false">%2$s</textarea>',
+			esc_attr( $option ),
+			esc_textarea( implode( "\n", $values ) )
+		);
+
+		printf(
+			'<p class="description">%s</p>',
+			esc_html(
+				sprintf(
+					/* translators: %s: comma-separated default Event Type list. */
+					__( 'Defaults to %s.', 'marthrown-enquiry-hub' ),
+					implode( ', ', EnquiryTaxonomies::EVENT_TYPE_DEFAULTS )
+				)
+			)
+		);
 	}
 
 	/*

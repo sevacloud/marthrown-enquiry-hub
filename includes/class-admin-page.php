@@ -102,6 +102,11 @@ class AdminPage {
 				'isStaging'       => (bool) ( function_exists( 'meh_is_staging' ) && meh_is_staging() ),
 				'statuses'        => RestEnquiries::STATUSES,
 				'bookingStatuses' => SourceWpbs::STATUSES,
+				// Both vocabularies the enquiry form renders as dropdowns —
+				// read the same way `Validator::allowed_terms()` reads them,
+				// so the form can never offer a value the server would refuse.
+				'eventTypes'      => Validator::allowed_terms( 'event_type' ),
+				'siteExclusivity' => Validator::allowed_terms( 'site_exclusivity' ),
 				'exportBase'      => esc_url_raw( admin_url( 'admin-post.php' ) ),
 				'exportAction'    => ExportBookings::ACTION,
 				'exportNonce'     => wp_create_nonce( ExportBookings::NONCE ),

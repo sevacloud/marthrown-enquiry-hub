@@ -463,7 +463,7 @@ class SoftDependencyGateTest extends WP_UnitTestCase {
 			'Total Guests'     => '60',
 			'Selected Dates'   => array( '2025-10-04', '2025-10-11' ),
 			'Event Type'       => array( 'wedding' ),
-			'Site Exclusivity' => array( 'exclusive' ),
+			'Site Exclusivity' => array( 'full site' ),
 			'Message'          => 'Enquiring about the barn for an October wedding.',
 		);
 	}

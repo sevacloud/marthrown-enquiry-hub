@@ -424,7 +424,7 @@ class SharedCreationPathTest extends WP_UnitTestCase {
 			'total_guests'     => '80',
 			'selected_dates'   => array( '2025-08-16', '2025-08-23' ),
 			'event_type'       => array( 'wedding' ),
-			'site_exclusivity' => array( 'exclusive' ),
+			'site_exclusivity' => array( 'full site' ),
 			'message'          => 'We would like to hold the ceremony outdoors.',
 		);
 	}

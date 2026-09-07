@@ -293,6 +293,18 @@ class ValidSubmissionIntakePropertyTest extends WP_UnitTestCase {
 		// so every field is resolved by its own name.
 		delete_option( FieldMapper::OPTION );
 
+		// The vocabularies the Validator checks a submitted multi-select
+		// against, so every generated `event_type`/`site_exclusivity` value is
+		// one the intake route accepts.
+		foreach ( array_keys( Generators::VOCABULARIES ) as $taxonomy ) {
+			add_filter(
+				'meh_enquiry_terms_' . $taxonomy,
+				static function () use ( $taxonomy ) {
+					return Generators::vocabulary( $taxonomy );
+				}
+			);
+		}
+
 		$this->crm = FakeCrm::install();
 
 		// A server of this test's own, so the route table holds what this test
