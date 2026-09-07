@@ -723,10 +723,16 @@ class Validator {
 	 * would be accepted and stored as 1 March — a day the enquirer never chose
 	 * (Requirement 3.6).
 	 *
+	 * Public rather than protected: `IntakeEndpoint::days_between()` parses a
+	 * configured start/end date pair through the same rule this class applies
+	 * to every other candidate date, so a value accepted as one end of a range
+	 * is a value `accepted_dates()` would accept on its own (Task 5 of the
+	 * candidate-dates-as-range change).
+	 *
 	 * @param mixed $value Submitted date value.
 	 * @return string|null
 	 */
-	protected static function parse_date( $value ) {
+	public static function parse_date( $value ) {
 		if ( ! is_scalar( $value ) ) {
 			return null;
 		}

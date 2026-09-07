@@ -155,7 +155,8 @@ describe( 'EnquiryManager', () => {
 			'Event type',
 			'Site exclusivity',
 			'Message',
-			'Date 1',
+			'Start date',
+			'End date',
 		].forEach( ( label ) => {
 			expect( screen.getByLabelText( label ).value ).toBe( '' );
 		} );
@@ -177,7 +178,7 @@ describe( 'EnquiryManager', () => {
 		fireEvent.change( screen.getByLabelText( 'Email' ), {
 			target: { value: 'grace@example.com' },
 		} );
-		fireEvent.change( screen.getByLabelText( 'Date 1' ), {
+		fireEvent.change( screen.getByLabelText( 'Start date' ), {
 			target: { value: '2026-06-01' },
 		} );
 

@@ -21,10 +21,22 @@
  *
  * Validation itself belongs to the server — one authority, applied to the
  * webhook and to these two routes alike — so the form marks `first_name`,
- * `last_name`, `email` and the first candidate date required, marks the other
- * five optional, and renders whatever a 400 names. The `errors` map is read
- * whole and rendered against each field it names, so a submission failing on
- * three fields reports all three in one pass instead of one per attempt.
+ * `last_name`, `email` and the start date required, marks the other five
+ * optional, and renders whatever a 400 names. The `errors` map is read whole
+ * and rendered against each field it names, so a submission failing on three
+ * fields reports all three in one pass instead of one per attempt.
+ *
+ * Candidate dates are still a *set* in the store and the Validator — an
+ * enquiry can hold 1 to 10 individual days, and nothing about that changed.
+ * What changed is what a person types here: rather than adding date rows one
+ * at a time, they choose a start date and an end date, and this form expands
+ * every day in between (inclusive) into the same `selected_dates` list the
+ * API has always accepted. An end date left blank is read as "just the one
+ * day" — the start date alone. This mirrors the same expansion
+ * `IntakeEndpoint::expand_date_range()` applies to a webhook configured to
+ * send a start/end pair instead of a date list, so a manually entered
+ * enquiry and one received from the customer-facing form arrive at the same
+ * shape.
  *
  * `status`, `source`, `is_test`, `booking_id` and the payload snapshot are
  * neither rendered nor submitted: none is a correctable detail, and the edit
@@ -34,6 +46,7 @@ import { __, sprintf } from '@wordpress/i18n';
 import { useMemo, useState } from '@wordpress/element';
 import {
 	Notice,
+	SelectControl,
 	Spinner,
 	TextControl,
 	TextareaControl,
@@ -58,16 +71,44 @@ const LABELS = {
 };
 
 /**
- * The two multi-value fields, entered as comma-separated lists.
+ * The two taxonomy fields, each a dropdown of exactly one value.
  *
- * The permitted vocabularies come from a site filter the browser cannot read,
- * so the form collects what was typed and lets the server's vocabulary check
- * be the judge.
+ * The store and the Validator both still hold `event_type` and
+ * `site_exclusivity` as term *sets* — 0 to 20 rows each — because a webhook
+ * submission can still carry several. This form narrows what a person can
+ * choose to one, which is what "a dropdown" means: `submitted()` wraps the
+ * chosen value in a single-element array, or an empty array when nothing is
+ * chosen. Editing an enquiry that already holds more than one stored term
+ * shows only the first of them, and saving the form then replaces the whole
+ * set with that one value — a real narrowing, not a display quirk.
+ *
+ * The vocabulary itself comes from `mehData`, which `AdminPage::enqueue_app()`
+ * populates from `Validator::allowed_terms()` — the same read the server does
+ * — so the dropdown can never offer a value the server would refuse.
  */
 const TAXONOMIES = [ 'event_type', 'site_exclusivity' ];
 
 /**
+ * The configured vocabulary for one taxonomy dropdown.
+ *
+ * @param {string} field 'event_type' | 'site_exclusivity'.
+ * @return {string[]} Permitted values; empty when nothing is configured.
+ */
+function vocabularyFor( field ) {
+	const data = window.mehData || {};
+	const key = 'event_type' === field ? 'eventTypes' : 'siteExclusivity';
+	const values = data[ key ];
+
+	return Array.isArray( values ) ? values : [];
+}
+
+/**
  * Candidate date ceiling, matching the validator's own (Requirement 3.5).
+ *
+ * Shown as a hint rather than enforced client-side: a range longer than this
+ * is still sent, and the server answers `too_many_dates` against
+ * `selected_dates` exactly as it would for ten manually added rows, which the
+ * existing `FieldError` on the fieldset already renders.
  */
 const MAX_DATES = 10;
 
@@ -115,36 +156,20 @@ export default function EnquiryForm( { enquiry = null, onSaved, onCancel } ) {
 	const isEdit = !! ( enquiry && enquiry.id );
 	const initial = useMemo( () => initialValues( enquiry ), [ enquiry ] );
 	const [ values, setValues ] = useState( initial );
+	const eventTypeOptions = useMemo(
+		() => vocabularyFor( 'event_type' ),
+		[]
+	);
+	const siteExclusivityOptions = useMemo(
+		() => vocabularyFor( 'site_exclusivity' ),
+		[]
+	);
 	const [ errors, setErrors ] = useState( {} );
 	const [ failure, setFailure ] = useState( '' );
 	const [ saving, setSaving ] = useState( false );
 
 	const set = ( field ) => ( value ) =>
 		setValues( ( prev ) => ( { ...prev, [ field ]: value } ) );
-
-	const setDate = ( index ) => ( value ) =>
-		setValues( ( prev ) => {
-			const dates = [ ...prev.selected_dates ];
-			dates[ index ] = value;
-			return { ...prev, selected_dates: dates };
-		} );
-
-	const addDate = () =>
-		setValues( ( prev ) => ( {
-			...prev,
-			selected_dates: [ ...prev.selected_dates, '' ],
-		} ) );
-
-	const removeDate = ( index ) =>
-		setValues( ( prev ) => {
-			const dates = prev.selected_dates.filter(
-				( _date, i ) => i !== index
-			);
-			return {
-				...prev,
-				selected_dates: dates.length ? dates : [ '' ],
-			};
-		} );
 
 	const onSubmit = async ( event ) => {
 		event.preventDefault();
@@ -248,47 +273,43 @@ export default function EnquiryForm( { enquiry = null, onSaved, onCancel } ) {
 					</span>
 				</legend>
 
-				{ values.selected_dates.map( ( date, index ) => (
-					// The row identity is the position, because two rows can
-					// legitimately hold the same value while one is being typed.
-					// eslint-disable-next-line react/no-array-index-key
-					<div className="meh-form__date" key={ index }>
-						<label className="meh-date-label">
-							{ sprintf(
-								/* translators: %d: candidate date position. */
-								__( 'Date %d', 'marthrown-enquiry-hub' ),
-								index + 1
-							) }
-							<input
-								type="date"
-								value={ date }
-								required={ 0 === index }
-								onChange={ ( e ) =>
-									setDate( index )( e.target.value )
-								}
-							/>
-						</label>
-						{ values.selected_dates.length > 1 && (
-							<button
-								type="button"
-								className="button-link"
-								onClick={ () => removeDate( index ) }
-							>
-								{ __( 'Remove', 'marthrown-enquiry-hub' ) }
-							</button>
-						) }
-					</div>
-				) ) }
+				<div className="meh-form__date">
+					<label className="meh-date-label">
+						{ __( 'Start date', 'marthrown-enquiry-hub' ) }
+						<input
+							type="date"
+							value={ values.date_start }
+							required
+							onChange={ ( e ) =>
+								set( 'date_start' )( e.target.value )
+							}
+						/>
+					</label>
+				</div>
 
-				{ values.selected_dates.length < MAX_DATES && (
-					<button
-						type="button"
-						className="button"
-						onClick={ addDate }
-					>
-						{ __( 'Add another date', 'marthrown-enquiry-hub' ) }
-					</button>
-				) }
+				<div className="meh-form__date">
+					<label className="meh-date-label">
+						{ __( 'End date', 'marthrown-enquiry-hub' ) }
+						<input
+							type="date"
+							value={ values.date_end }
+							onChange={ ( e ) =>
+								set( 'date_end' )( e.target.value )
+							}
+						/>
+					</label>
+				</div>
+
+				<p className="description">
+					{ sprintf(
+						/* translators: %d: maximum number of candidate dates. */
+						__(
+							'Every day from the start date to the end date is added as a candidate date, up to %d.  Leave the end date blank for a single day.',
+							'marthrown-enquiry-hub'
+						),
+						MAX_DATES
+					) }
+				</p>
 
 				<FieldError code={ errors.selected_dates } />
 			</fieldset>
@@ -315,21 +336,23 @@ export default function EnquiryForm( { enquiry = null, onSaved, onCancel } ) {
 			/>
 			<FieldError code={ errors.total_guests } />
 
-			<TextControl
+			<SelectControl
 				label={ LABELS.event_type }
 				value={ values.event_type }
+				options={ taxonomyOptions( eventTypeOptions ) }
 				onChange={ set( 'event_type' ) }
-				help={ optionalHint( listHint() ) }
+				help={ optionalHint() }
 				className="meh-form__field"
 				__nextHasNoMarginBottom
 			/>
 			<FieldError code={ errors.event_type } />
 
-			<TextControl
+			<SelectControl
 				label={ LABELS.site_exclusivity }
 				value={ values.site_exclusivity }
+				options={ taxonomyOptions( siteExclusivityOptions ) }
 				onChange={ set( 'site_exclusivity' ) }
-				help={ optionalHint( listHint() ) }
+				help={ optionalHint() }
 				className="meh-form__field"
 				__nextHasNoMarginBottom
 			/>
@@ -402,7 +425,18 @@ function FieldError( { code } ) {
  */
 function initialValues( enquiry ) {
 	const stored = enquiry || {};
-	const dates = list( stored.selected_dates );
+	const dates = list( stored.selected_dates ).sort();
+
+	// The start/end inputs show the earliest and latest stored candidate date.
+	// Where the stored set is not itself a contiguous run of days — which can
+	// only happen on an enquiry created before this form collected a range, or
+	// one a webhook populated as a genuine list — resaving the form without
+	// touching these two fields would replace that set with the full run
+	// between them. That narrowing mirrors the one already accepted for
+	// `event_type`/`site_exclusivity` above: opening the form on such an
+	// enquiry shows a range, not the exact stored set.
+	const dateStart = dates.length ? dates[ 0 ] : '';
+	const dateEnd = dates.length > 1 ? dates[ dates.length - 1 ] : '';
 
 	return {
 		first_name: text( stored.first_name ),
@@ -410,11 +444,73 @@ function initialValues( enquiry ) {
 		email: text( stored.email ),
 		phone: text( stored.phone ),
 		total_guests: text( stored.total_guests ),
-		selected_dates: dates.length ? dates : [ '' ],
-		event_type: list( stored.event_type ).join( ', ' ),
-		site_exclusivity: list( stored.site_exclusivity ).join( ', ' ),
+		date_start: dateStart,
+		date_end: dateEnd,
+		// The dropdown holds one value: the first of whatever is stored, empty
+		// when nothing is. A stored set of more than one narrows to its first
+		// member the moment this form is opened on it (see the TAXONOMIES
+		// comment above) rather than only on save.
+		event_type: list( stored.event_type )[ 0 ] || '',
+		site_exclusivity: list( stored.site_exclusivity )[ 0 ] || '',
 		message: text( stored.message ),
 	};
+}
+
+/**
+ * Every calendar day from a start date to an end date, inclusive.
+ *
+ * Mirrors `IntakeEndpoint::days_between()` on the server, so a manually
+ * entered range and one a webhook sends as a start/end pair expand into the
+ * same candidate-date list. An end date left blank, or one before the start
+ * date, yields just the start date alone rather than an error: the actual
+ * `too_few_dates`/`unparseable_date` rejections remain the server's to make.
+ *
+ * @param {string} start `YYYY-MM-DD`, or empty.
+ * @param {string} end   `YYYY-MM-DD`, or empty.
+ * @return {string[]} Candidate dates, oldest first.
+ */
+function daysBetween( start, end ) {
+	const startDate = parseIsoDate( start );
+
+	if ( ! startDate ) {
+		return [];
+	}
+
+	const endDate = parseIsoDate( end ) || startDate;
+
+	if ( endDate < startDate ) {
+		return [ start ];
+	}
+
+	const days = [];
+	const cursor = new Date( startDate );
+
+	while ( cursor <= endDate && days.length <= MAX_DATES + 1 ) {
+		days.push( cursor.toISOString().slice( 0, 10 ) );
+		cursor.setUTCDate( cursor.getUTCDate() + 1 );
+	}
+
+	return days;
+}
+
+/**
+ * A `YYYY-MM-DD` string as a UTC `Date`, or null when it does not parse.
+ *
+ * Parsed as UTC midnight rather than through the local-timezone constructor,
+ * so iterating a day at a time cannot skip or repeat a day around a daylight
+ * saving transition.
+ *
+ * @param {string} value Date input value.
+ * @return {Date|null}
+ */
+function parseIsoDate( value ) {
+	if ( ! /^\d{4}-\d{2}-\d{2}$/.test( String( value || '' ) ) ) {
+		return null;
+	}
+
+	const date = new Date( `${ value }T00:00:00Z` );
+
+	return Number.isNaN( date.getTime() ) ? null : date;
 }
 
 /**
@@ -486,16 +582,16 @@ function alteredFields( values, initial ) {
  */
 function submitted( values, field ) {
 	if ( 'selected_dates' === field ) {
-		return values.selected_dates
-			.map( ( date ) => date.trim() )
-			.filter( ( date ) => '' !== date );
+		return daysBetween(
+			values.date_start.trim(),
+			values.date_end.trim()
+		);
 	}
 
 	if ( TAXONOMIES.includes( field ) ) {
-		return values[ field ]
-			.split( ',' )
-			.map( ( term ) => term.trim() )
-			.filter( ( term ) => '' !== term );
+		const chosen = values[ field ].trim();
+
+		return '' === chosen ? [] : [ chosen ];
 	}
 
 	return values[ field ].trim();
@@ -596,10 +692,16 @@ function optionalHint( note = '' ) {
 }
 
 /**
- * The note the two comma-separated fields carry.
+ * A taxonomy vocabulary as `SelectControl` options, with a leading blank
+ * option so the field can be left unset — both taxonomies are optional under
+ * the Manual Validation Profile.
  *
- * @return {string} Help text.
+ * @param {string[]} values Configured vocabulary.
+ * @return {Array<{label: string, value: string}>}
  */
-function listHint() {
-	return __( 'Separate values with commas.', 'marthrown-enquiry-hub' );
+function taxonomyOptions( values ) {
+	return [
+		{ label: __( '— None —', 'marthrown-enquiry-hub' ), value: '' },
+		...values.map( ( value ) => ( { label: value, value } ) ),
+	];
 }

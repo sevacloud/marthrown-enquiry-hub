@@ -24,6 +24,15 @@ jest.mock( '@wordpress/api-fetch', () => ( {
 	default: jest.fn(),
 } ) );
 
+// EnquiryForm's two taxonomy dropdowns read their options from
+// window.mehData, exactly as AdminPage::enqueue_app() populates it in
+// production. Values here match what ENQUIRY stores, so the edit form below
+// can pre-select them the way a real vocabulary containing "wedding" would.
+window.mehData = {
+	eventTypes: [ 'wedding', 'party' ],
+	siteExclusivity: [ 'whole site', 'shared' ],
+};
+
 /**
  * A `contacted` enquiry with everything the summary and the edit form read.
  */
@@ -170,8 +179,12 @@ describe( 'EnquiryDetail edit control', () => {
 		expect( screen.getByLabelText( 'Message' ).value ).toBe(
 			'Two nights, marquee on the lawn.'
 		);
-		expect( screen.getByLabelText( 'Date 1' ).value ).toBe( '2026-05-01' );
-		expect( screen.getByLabelText( 'Date 2' ).value ).toBe( '2026-05-02' );
+		expect( screen.getByLabelText( 'Start date' ).value ).toBe(
+			'2026-05-01'
+		);
+		expect( screen.getByLabelText( 'End date' ).value ).toBe(
+			'2026-05-02'
+		);
 	} );
 
 	it( 'patches /enquiries/{id} with only the fields the user altered', async () => {

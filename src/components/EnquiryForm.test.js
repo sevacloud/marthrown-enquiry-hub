@@ -23,7 +23,7 @@ jest.mock( '@wordpress/api-fetch', () => ( {
 
 /**
  * The three text fields the form marks required, and the fourth it marks
- * required as the first candidate date row.
+ * required as the start date.
  */
 const REQUIRED = [ 'First name', 'Last name', 'Email' ];
 
@@ -79,7 +79,7 @@ function fillRequired( {
 	fireEvent.change( screen.getByLabelText( 'Email' ), {
 		target: { value: email },
 	} );
-	fireEvent.change( screen.getByLabelText( 'Date 1' ), {
+	fireEvent.change( screen.getByLabelText( 'Start date' ), {
 		target: { value: date },
 	} );
 }
@@ -89,14 +89,15 @@ beforeEach( () => {
 } );
 
 describe( 'EnquiryForm in create mode', () => {
-	it( 'marks the three required text fields and the first candidate date required', () => {
+	it( 'marks the three required text fields and the start date required', () => {
 		render( <EnquiryForm /> );
 
 		REQUIRED.forEach( ( label ) => {
 			expect( screen.getByLabelText( label ).required ).toBe( true );
 		} );
 
-		expect( screen.getByLabelText( 'Date 1' ).required ).toBe( true );
+		expect( screen.getByLabelText( 'Start date' ).required ).toBe( true );
+		expect( screen.getByLabelText( 'End date' ).required ).toBe( false );
 	} );
 
 	it( 'marks the remaining five fields optional and says so', () => {
@@ -159,7 +160,7 @@ describe( 'EnquiryForm in create mode', () => {
 			'Choose at least one candidate date.'
 		);
 		expect( dateError.closest( 'fieldset' ) ).toBe(
-			screen.getByLabelText( 'Date 1' ).closest( 'fieldset' )
+			screen.getByLabelText( 'Start date' ).closest( 'fieldset' )
 		);
 	} );
 } );

@@ -93,6 +93,30 @@ class IntakeEndpoint {
 	const SOURCE_FIELD_OPTION = 'meh_intake_source_field';
 
 	/**
+	 * Options naming the payload fields holding a start/end date pair.
+	 *
+	 * A sending form can be configured, instead of delivering `selected_dates`
+	 * as a list, to deliver a start date and an end date that together name a
+	 * range. Both options have to hold a non-empty value, and both configured
+	 * fields have to resolve to a parseable date, for the range to expand: a
+	 * site that has configured neither is unaffected, which is what keeps this
+	 * additive rather than a change to how `selected_dates` behaves for every
+	 * existing sender.
+	 */
+	const START_DATE_FIELD_OPTION = 'meh_intake_start_date_field';
+	const END_DATE_FIELD_OPTION   = 'meh_intake_end_date_field';
+
+	/**
+	 * The longest range `expand_date_range()` will expand.
+	 *
+	 * The Validator's own MAX_DATES (10) rejects anything this long once
+	 * `selected_dates` reaches it, so this bound exists only to stop a
+	 * mistyped multi-year range from building a very large array before that
+	 * rejection is reached.
+	 */
+	const MAX_RANGE_DAYS = 366;
+
+	/**
 	 * Prefix applied to a resolved form identifier to form `source`.
 	 */
 	const SOURCE_PREFIX = 'webhook:';
@@ -612,7 +636,152 @@ class IntakeEndpoint {
 	 * @return array<string,mixed>
 	 */
 	public static function normalise( $request ) {
-		return self::split_multi_values( self::flatten( self::body( $request ) ) );
+		$flat = self::flatten( self::body( $request ) );
+		$flat = self::expand_date_range( $flat );
+
+		return self::split_multi_values( $flat );
+	}
+
+	/**
+	 * Expand a configured start/end date pair into `selected_dates`.
+	 *
+	 * A sending form's webhook action offers no way to submit a date range as
+	 * a single field carrying every night in it, so where the site is
+	 * configured to receive a start date and an end date as two separate
+	 * payload fields, this turns that pair into the day list `selected_dates`
+	 * has always been (Requirements 3.5-adjacent: candidate dates remain a
+	 * set, this only changes what a sender may submit to populate it).
+	 *
+	 * Both `self::START_DATE_FIELD_OPTION` and `self::END_DATE_FIELD_OPTION`
+	 * have to be configured, and both configured fields have to be present in
+	 * the payload and parse as a date, or nothing here does anything: a
+	 * half-configured site, or a request missing one half of the pair, leaves
+	 * the payload untouched for the existing `selected_dates` handling to read
+	 * as it always has (which, finding nothing, reports `too_few_dates` — the
+	 * same failure an omitted `selected_dates` already produces).
+	 *
+	 * `selected_dates` in the payload is left alone when the sender already
+	 * supplied one: a start/end pair sent alongside an explicit
+	 * `selected_dates` is not a shape any real sender produces, and preferring
+	 * the field the sender actually populated is the safer reading of an
+	 * ambiguous payload.
+	 *
+	 * The two source fields are removed from the flat map once expanded, so
+	 * they cannot be mistaken for `selected_dates` (or anything else) by the
+	 * label-matching FieldMapper falls back to.
+	 *
+	 * @param array $flat Flattened field map.
+	 * @return array<string,mixed>
+	 */
+	protected static function expand_date_range( array $flat ) {
+		$start_field = self::configured_date_field( self::START_DATE_FIELD_OPTION );
+		$end_field   = self::configured_date_field( self::END_DATE_FIELD_OPTION );
+
+		if ( '' === $start_field || '' === $end_field ) {
+			return $flat;
+		}
+
+		$start_key = self::matching_key( $flat, $start_field );
+		$end_key   = self::matching_key( $flat, $end_field );
+
+		if ( null === $start_key || null === $end_key ) {
+			return $flat;
+		}
+
+		$dates_key = self::matching_key( $flat, 'selected_dates' );
+
+		if ( null !== $dates_key && ! self::is_empty_value( $flat[ $dates_key ] ) ) {
+			return $flat;
+		}
+
+		$range = self::days_between( $flat[ $start_key ], $flat[ $end_key ] );
+
+		if ( array() === $range ) {
+			return $flat;
+		}
+
+		unset( $flat[ $start_key ], $flat[ $end_key ] );
+
+		$flat['selected_dates'] = $range;
+
+		return $flat;
+	}
+
+	/**
+	 * A configured start/end date field option, trimmed.
+	 *
+	 * @param string $option Option name.
+	 * @return string Empty when unconfigured.
+	 */
+	protected static function configured_date_field( $option ) {
+		$configured = function_exists( 'get_option' ) ? get_option( $option, '' ) : '';
+
+		return is_scalar( $configured ) ? trim( (string) $configured ) : '';
+	}
+
+	/**
+	 * Whether a flattened field's value counts as carrying nothing.
+	 *
+	 * @param mixed $value Field value.
+	 * @return bool
+	 */
+	protected static function is_empty_value( $value ) {
+		if ( is_array( $value ) ) {
+			return array() === $value;
+		}
+
+		return ! is_scalar( $value ) || '' === trim( (string) $value );
+	}
+
+	/**
+	 * Every calendar day from a start value to an end value, inclusive.
+	 *
+	 * Uses the same accepted date formats the Validator itself parses, via
+	 * `Validator::parse_date()`, so a range sent in any format a single
+	 * candidate date may already arrive in is understood the same way. An end
+	 * date before the start date, either end failing to parse, or a range
+	 * longer than `self::MAX_RANGE_DAYS` all return no days rather than a
+	 * guess, which leaves the payload for the ordinary `too_few_dates`/
+	 * `unparseable_date` failures to report.
+	 *
+	 * @param mixed $start Submitted start date value.
+	 * @param mixed $end   Submitted end date value.
+	 * @return string[] `Y-m-d` entries, oldest first. Empty when the pair does
+	 *                   not describe a usable range.
+	 */
+	protected static function days_between( $start, $end ) {
+		$start_date = Validator::parse_date( $start );
+		$end_date   = Validator::parse_date( $end );
+
+		if ( null === $start_date || null === $end_date ) {
+			return array();
+		}
+
+		try {
+			$cursor = new \DateTimeImmutable( $start_date );
+			$last   = new \DateTimeImmutable( $end_date );
+		} catch ( \Exception $e ) {
+			return array();
+		}
+
+		if ( $cursor > $last ) {
+			return array();
+		}
+
+		$days = array();
+		$one  = new \DateInterval( 'P1D' );
+
+		while ( $cursor <= $last ) {
+			$days[] = $cursor->format( 'Y-m-d' );
+
+			if ( count( $days ) > self::MAX_RANGE_DAYS ) {
+				return array();
+			}
+
+			$cursor = $cursor->add( $one );
+		}
+
+		return $days;
 	}
 
 	/**
