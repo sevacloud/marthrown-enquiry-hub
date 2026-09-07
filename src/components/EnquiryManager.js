@@ -27,12 +27,13 @@
  */
 import { __ } from '@wordpress/i18n';
 import { useState, useCallback } from '@wordpress/element';
-import { Spinner, Notice } from '@wordpress/components';
+import { Notice } from '@wordpress/components';
 import usePolling from '../hooks/usePolling';
-import { getEnquiries } from '../api';
+import { getEnquiries, enquiriesExportUrl } from '../api';
 import EnquiryFilters from './EnquiryFilters';
 import EnquiryDetail from './EnquiryDetail';
 import EnquiryForm from './EnquiryForm';
+import HubTable from './HubTable';
 import StatusBadge from './StatusBadge';
 
 /**
@@ -72,10 +73,36 @@ const WARNINGS = {
 	),
 };
 
-const COLUMNS = 5;
+/**
+ * The list table's columns, in display order. Shared between the header row
+ * and each row's cell renderer, so the two cannot drift out of step.
+ */
+const COLUMNS = [
+	{ key: 'name', label: __( 'Name', 'marthrown-enquiry-hub' ) },
+	{ key: 'contact', label: __( 'Contact', 'marthrown-enquiry-hub' ) },
+	{
+		key: 'dates',
+		label: __( 'Candidate dates', 'marthrown-enquiry-hub' ),
+	},
+	{ key: 'status', label: __( 'Status', 'marthrown-enquiry-hub' ) },
+	{ key: 'received', label: __( 'Received', 'marthrown-enquiry-hub' ) },
+];
 
-export default function EnquiryManager( { title, defaultStatus = 'all' } ) {
-	const heading = title || __( 'Event enquiries', 'marthrown-enquiry-hub' );
+export default function EnquiryManager( {
+	title,
+	defaultStatus = 'all',
+	headingLevel = 2,
+} ) {
+	const heading = title || __( 'Event Enquiries', 'marthrown-enquiry-hub' );
+
+	// The visible page title is this section's head, so the level is the
+	// caller's to choose: the primary section of a view passes 1 and becomes the
+	// document's one h1. Clamped, because an out-of-range level would emit a tag
+	// that is not a heading at all.
+	const Heading = `h${ Math.min(
+		Math.max( parseInt( headingLevel, 10 ) || 2, 1 ),
+		6
+	) }`;
 	const [ filters, setFilters ] = useState( {
 		status: defaultStatus,
 		s: '',
@@ -116,11 +143,11 @@ export default function EnquiryManager( { title, defaultStatus = 'all' } ) {
 	return (
 		<section>
 			<header className="meh-section__head">
-				<h2>{ heading }</h2>
+				<Heading>{ heading }</Heading>
 				<div className="meh-header-actions">
 					<button
 						type="button"
-						className="button button-primary"
+						className="button"
 						onClick={ () => {
 							setSelectedId( 0 );
 							setCreating( true );
@@ -133,15 +160,6 @@ export default function EnquiryManager( { title, defaultStatus = 'all' } ) {
 					</button>
 				</div>
 			</header>
-
-			{ error && (
-				<Notice status="error" isDismissible={ false }>
-					{ __(
-						'Could not load enquiries.',
-						'marthrown-enquiry-hub'
-					) }
-				</Notice>
-			) }
 
 			{ /* A half-open candidate-date range is ignored rather than guessed
 			     at, and the API says which end is missing (Requirement 12.8). */ }
@@ -171,127 +189,99 @@ export default function EnquiryManager( { title, defaultStatus = 'all' } ) {
 			) }
 
 			{ ! creating && 0 === selectedId && (
-				<>
-					<div className="meh-period-tabs">
-						{ TABS.map( ( tab ) => (
-							<button
-								key={ tab.key }
-								type="button"
-								className={ `meh-period-tab${
-									filters.status === tab.key
-										? ' is-active'
-										: ''
-								}` }
-								aria-pressed={ filters.status === tab.key }
-								onClick={ () =>
-									setFilters( {
-										...filters,
-										status: tab.key,
-										page: 1,
-									} )
-								}
-							>
-								{ tab.label }
-								<span className="count">
-									{ counts[ tab.key ] || 0 }
-								</span>
-							</button>
-						) ) }
-					</div>
-
-					<EnquiryFilters
-						filters={ filters }
-						onChange={ setFilters }
-					/>
-
-					<table className="widefat striped meh-table">
-						<thead>
-							<tr>
-								<th>
-									{ __( 'Name', 'marthrown-enquiry-hub' ) }
-								</th>
-								<th>
-									{ __( 'Contact', 'marthrown-enquiry-hub' ) }
-								</th>
-								<th>
-									{ __(
-										'Candidate dates',
-										'marthrown-enquiry-hub'
-									) }
-								</th>
-								<th>
-									{ __( 'Status', 'marthrown-enquiry-hub' ) }
-								</th>
-								<th>
-									{ __( 'Received', 'marthrown-enquiry-hub' ) }
-								</th>
-							</tr>
-						</thead>
-						<tbody>
-							{ loading && ! data && (
-								<tr>
-									<td colSpan={ COLUMNS }>
-										<Spinner />
-									</td>
-								</tr>
-							) }
-							{ ! loading && 0 === items.length && (
-								<tr>
-									<td colSpan={ COLUMNS }>
-										{ __(
-											'No enquiries found.',
-											'marthrown-enquiry-hub'
-										) }
-									</td>
-								</tr>
-							) }
-							{ items.map( ( row ) => (
-								<tr key={ row.id }>
-									<td>
-										<button
-											type="button"
-											className="button-link meh-row-open"
-											onClick={ () =>
-												setSelectedId(
-													parseInt( row.id, 10 )
-												)
-											}
-										>
-											{ fullName( row ) }
-										</button>
-										{ row.is_test && (
-											<span className="meh-badge meh-badge--test">
-												{ __(
-													'Test',
-													'marthrown-enquiry-hub'
-												) }
-											</span>
-										) }
-									</td>
-									<td>
-										{ row.email }
-										{ row.phone ? (
-											<>
-												<br />
-												<span className="meh-muted">
-													{ row.phone }
-												</span>
-											</>
-										) : null }
-									</td>
-									<td>{ dateList( row.selected_dates ) }</td>
-									<td>
-										<StatusBadge status={ row.status } />
-									</td>
-									<td>{ day( row.created_at ) }</td>
-								</tr>
-							) ) }
-						</tbody>
-					</table>
-				</>
+				<HubTable
+					tabs={ TABS.map( ( tab ) => ( {
+						...tab,
+						count: counts[ tab.key ] || 0,
+					} ) ) }
+					activeTab={ filters.status }
+					onTabChange={ ( status ) =>
+						setFilters( { ...filters, status, page: 1 } )
+					}
+					toolbar={
+						<EnquiryFilters
+							filters={ filters }
+							onChange={ setFilters }
+						/>
+					}
+					exportUrl={ enquiriesExportUrl( filters ) }
+					columns={ COLUMNS }
+					rows={ items }
+					rowKey={ ( row ) => row.id }
+					renderCell={ ( row, column ) =>
+						renderEnquiryCell( row, column, setSelectedId )
+					}
+					loading={ loading && ! data }
+					error={ error }
+					errorText={ __(
+						'Could not load enquiries.',
+						'marthrown-enquiry-hub'
+					) }
+					emptyText={ __(
+						'No enquiries found.',
+						'marthrown-enquiry-hub'
+					) }
+				/>
 			) }
 		</section>
 	);
+}
+
+/**
+ * One cell of the enquiry list, by column key.
+ *
+ * @param {Object}   row           Listed enquiry.
+ * @param {Object}   column        `{ key, label }` from COLUMNS.
+ * @param {Function} setSelectedId Opens the detail panel on this row's id.
+ * @return {*} Cell content.
+ */
+function renderEnquiryCell( row, column, setSelectedId ) {
+	switch ( column.key ) {
+		case 'name':
+			return (
+				<>
+					<button
+						type="button"
+						className="button-link meh-row-open"
+						onClick={ () =>
+							setSelectedId( Number.parseInt( row.id, 10 ) )
+						}
+					>
+						{ fullName( row ) }
+					</button>
+					{ row.is_test && (
+						<span className="meh-badge meh-badge--test">
+							{ __( 'Test', 'marthrown-enquiry-hub' ) }
+						</span>
+					) }
+				</>
+			);
+
+		case 'contact':
+			return (
+				<>
+					{ row.email }
+					{ row.phone ? (
+						<>
+							<br />
+							<span className="meh-muted">{ row.phone }</span>
+						</>
+					) : null }
+				</>
+			);
+
+		case 'dates':
+			return dateList( row.selected_dates );
+
+		case 'status':
+			return <StatusBadge status={ row.status } />;
+
+		case 'received':
+			return day( row.created_at );
+
+		default:
+			return null;
+	}
 }
 
 /**

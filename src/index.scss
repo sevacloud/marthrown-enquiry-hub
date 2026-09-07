@@ -2,8 +2,87 @@
  * Enquiry Hub React app styles.
  */
 
+/* --- Shared section header bar -------------------------------------------
+ *
+ * Every section on the page is titled the same way. The treatment started life
+ * on the Bookings Manager as `.wpbs-plugin-sticky-header`, and the other
+ * sections each had their own approximation of it; this is that one bar, named
+ * once and included by all of them.
+ *
+ * It assumes what is true of all four: the header is the first child of a
+ * padded card. The negative margin cancels the card's own padding so the bar
+ * bleeds to its edges, which is why it matches `.meh-section`'s 12px 16px
+ * padding exactly.
+ *
+ * The bar is square and carries no border. A card that is itself rounded
+ * therefore needs `overflow: hidden`, or the bar's corners will sit outside it.
+ *
+ * The heading is matched on element and on class, because each component names
+ * its own differently: an h1 or h2 in the enquiry list, a span on the Bookings
+ * Manager, an h1 on the Calendar, an h3 in the detail panel.
+ */
+@mixin meh-section-bar {
+	display: flex;
+	/* Wraps rather than overflows: the Bookings Manager bar carries a calendar
+	   select and two buttons, which do not fit beside the title on a narrow
+	   screen. */
+	flex-wrap: wrap;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px 12px;
+	margin: -12px -16px 12px;
+	padding: 10px 16px;
+	/* The brand green, matching the page header. No bottom border: against the
+	   white card below, the colour change is the separation, and a light grey
+	   hairline on the green read as a mistake. */
+	background: #097464;
+	color: #fbfbff;
+
+	h1,
+	h2,
+	h3,
+	.wpbs-page-heading {
+		margin: 0;
+		color: inherit;
+		font-size: 15px;
+		font-weight: 600;
+		line-height: 1.3;
+	}
+}
+
+/* --- Shared toggle button -------------------------------------------------
+ *
+ * The side nav's view switcher and the status tab strips are one control in two
+ * layouts: a set of options with exactly one active. Only the skin is shared —
+ * colour, border, radius, type and the active state. Each caller keeps its own
+ * box, because one is a full-width stack and the other a horizontal row.
+ */
+@mixin meh-toggle-button {
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	color: #097464;
+	cursor: pointer;
+	font-size: 13px;
+
+	&:hover {
+		border-color: #097464;
+	}
+
+	&.is-active {
+		background: #097464;
+		border-color: #097464;
+		color: #fbfbff;
+		font-weight: 600;
+	}
+}
+
 .meh-app {
-	max-width: 1400px;
+	/* Fills the shell rather than being centred in a 1400px column, so a wide
+	   monitor gets no gutter either side. */
+	flex: 1 1 auto;
+	min-width: 0;
+	display: flex;
 
 	&__title {
 		margin: 12px 0 8px;
@@ -27,19 +106,14 @@
 .meh-section {
 	margin: 0 0 28px;
 	background: #fff;
-	border: 1px solid #dcdcde;
-	border-radius: 6px;
 	padding: 12px 16px 16px;
 
+	/* The page's visible title sits here, at whatever heading level the caller
+	   chose — the primary section of a view renders h1. The bar states the size
+	   itself, so the browser default for whichever tag arrived (roughly double,
+	   for an h1) never shows through. */
 	&__head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-
-		h2 {
-			margin: 4px 0;
-		}
+		@include meh-section-bar;
 	}
 }
 
@@ -48,9 +122,21 @@
 	font-weight: 400;
 }
 
-.meh-filters {
+/* The search/filter row `HubTable` renders above its table, holding whatever
+   toolbar the caller passed plus the Export CSV link. One rule for both lists,
+   replacing what used to be `.meh-filters` on the enquiry side and
+   `.wpbs-bm-toolbar` on the bookings side — the two were the same row with
+   different names and a slightly different gap. */
+.meh-list-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: flex-end;
+	gap: 12px;
 	margin: 8px 0 12px;
-	gap: 16px;
+
+	input[type='search'] {
+		min-width: 220px;
+	}
 }
 
 .meh-date-label {
@@ -145,11 +231,11 @@
 	align-items: center;
 	gap: 6px;
 	padding: 6px 12px;
-	background: #fff;
-	border: 1px solid #c3c4c7;
-	border-radius: 999px;
-	cursor: pointer;
-	font-size: 13px;
+
+	/* Same skin as the side nav's buttons, including the 4px radius: these were
+	   999px pills, which read as a different component from the nav rather than
+	   the same control in another layout. */
+	@include meh-toggle-button;
 
 	.count {
 		display: inline-block;
@@ -162,73 +248,24 @@
 		text-align: center;
 	}
 
-	&.is-active {
-		background: #2271b1;
-		border-color: #2271b1;
-		color: #fff;
-		font-weight: 600;
-
-		.count {
-			background: rgba( 255, 255, 255, 0.25 );
-			color: #fff;
-		}
+	/* Solid, not a translucent white. A 25% white over the green gives 3.5:1
+	   against the count's own text, under the 4.5:1 AA needs at 11px; inverting
+	   the bar's colours gives 5.5:1. */
+	&.is-active .count {
+		background: #fbfbff;
+		color: #097464;
 	}
 }
 
 /* --- Bookings Manager (WPBS-style) --- */
 
-.wpbs-bm {
+/* The section bar, shared by the Bookings Manager and the Calendar view. It used
+   to be scoped to `.wpbs-bm` alone, which left the Calendar's copy of the same
+   markup unstyled on the front end, where WPBS's own admin CSS is not loaded. */
+.wpbs-bm,
+.meh-calendar {
 	.wpbs-plugin-sticky-header {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
-		margin: -12px -16px 12px;
-		padding: 10px 16px;
-		background: #f6f7f7;
-		border-bottom: 1px solid #dcdcde;
-		border-radius: 6px 6px 0 0;
-
-		.wpbs-page-heading {
-			font-size: 15px;
-			font-weight: 600;
-		}
-	}
-
-	.wpbs-bm-tabs {
-		margin: 4px 0 8px;
-		padding: 0;
-		list-style: none;
-
-		li {
-			display: inline;
-			color: #646970;
-		}
-
-		a {
-			text-decoration: none;
-
-			&.current {
-				font-weight: 600;
-				color: #1d2327;
-			}
-		}
-
-		.count {
-			color: #646970;
-		}
-	}
-
-	.wpbs-bm-toolbar {
-		display: flex;
-		flex-wrap: wrap;
-		align-items: flex-end;
-		gap: 12px;
-		margin: 0 0 12px;
-
-		input[type='search'] {
-			min-width: 220px;
-		}
+		@include meh-section-bar;
 	}
 }
 
@@ -277,65 +314,128 @@
 
 .meh-layout {
 	display: flex;
-	align-items: flex-start;
-	gap: 20px;
+	/* Stretch, not flex-start: this is what makes the nav column the full height
+	   of the shell, so its border runs top to bottom and its bottom-pinned links
+	   sit at the bottom of the screen. */
+	align-items: stretch;
+	flex: 1 1 auto;
+	min-width: 0;
+	min-height: 0;
 }
 
 .meh-sidenav {
 	flex: 0 0 180px;
-	position: sticky;
-	top: 40px;
 
-	&__title {
-		font-size: 14px;
-		margin: 8px 0;
+	/* No longer sticky, and it does not need to be: the shell is exactly the
+	   height of the window and only `.meh-main` scrolls, so this column is
+	   already static by construction. Sticky was the source of the bug it was
+	   meant to solve — at the top of the page the element sat in normal flow, so
+	   a viewport-height column starting a few hundred pixels down ran off the
+	   bottom of the screen and took its bottom-pinned links with it. */
+	display: flex;
+	flex-direction: column;
+	/* Its own scrollbar if the nav ever outgrows the window. */
+	overflow-y: auto;
+	padding: 20px;
+	/* Runs the full height of the column, so it reads as the divide between the
+	   nav and the content rather than as a rule under the nav's items. */
+	border-right: 2px solid #097464;
+	/* With this, the 180px flex basis is the outer width: the padding and border
+	   come out of it rather than adding to it. */
+	box-sizing: border-box;
+
+	/* The lists own the spacing between their items; nothing inside them carries
+	   a margin of its own. Both resets matter: a `ul` inherits a 1em vertical
+	   margin and a 40px start indent from the browser, and against 138px of
+	   content width that indent was most of what looked like over-padding. */
+	ul {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+		margin: 0;
+		padding: 0;
+		list-style: none;
 	}
 
-	ul {
+	li {
 		margin: 0;
-		list-style: none;
+		padding: 0;
 	}
 
 	li button {
 		display: block;
 		width: 100%;
-		text-align: left;
+		margin: 0;
+		/* Not peripheral spacing: the control is filled and bordered, so this is
+		   the room its own label needs inside it. */
 		padding: 8px 12px;
-		margin: 0 0 4px;
-		background: #fff;
-		border: 1px solid #dcdcde;
-		border-radius: 4px;
-		cursor: pointer;
-		font-size: 13px;
+		text-align: left;
 
-		&.is-active {
-			background: #2271b1;
-			border-color: #2271b1;
-			color: #fff;
-			font-weight: 600;
-		}
-	}
-}
-
-.meh-sidenav__links {
-	margin: 12px 0 0;
-	padding-top: 10px;
-	border-top: 1px solid #dcdcde;
-	list-style: none;
-
-	li {
-		margin: 0 0 6px;
+		@include meh-toggle-button;
 	}
 
-	a {
+	/* The one nav item that leaves the app, wearing the same skin as the buttons
+	   beside it. No `width: 100%`: a block-level anchor already fills the column
+	   at `width: auto`, and the padding then sits inside it rather than adding to
+	   it as it would against an explicit width. */
+	li a.meh-sidenav__external {
 		display: block;
-		padding: 4px 12px;
-		color: #2271b1;
-		font-size: 13px;
+		margin: 0;
+		padding: 8px 12px;
+		text-align: left;
 		text-decoration: none;
 
-		&:hover {
-			text-decoration: underline;
+		@include meh-toggle-button;
+	}
+
+	/* Deliberately more specific than the `ul` rule above, which would otherwise
+	   win on the margin — it is `.meh-sidenav ul` against `.meh-sidenav__links`,
+	   (0,1,1) against (0,1,0) — and reset the auto top margin that pushes this
+	   block to the bottom of the column. */
+	ul.meh-sidenav__links {
+		gap: 6px;
+		margin-top: auto;
+		margin-bottom: 10px;
+		padding-top: 10px;
+		border-top: 1px solid #dcdcde;
+
+		a {
+			display: block;
+			/* A plain text link, so its spacing was peripheral and belongs to
+			   the list above rather than to each item. */
+			margin: 0;
+			padding: 0;
+			color: #097464;
+			font-size: 13px;
+			text-decoration: none;
+
+			&:hover {
+				text-decoration: underline;
+			}
+		}
+
+		/* Icon only, so it is sized by the glyph and not by a label. Never
+		   underlined — there is no text for a rule to sit under. */
+		a.meh-sidenav__settings {
+			display: inline-flex;
+			align-items: center;
+			justify-content: center;
+			width: 32px;
+			height: 32px;
+			color: #097464;
+
+			&:hover,
+			&:focus {
+				color: #097464;
+				text-decoration: none;
+			}
+
+			.dashicons {
+				width: 22px;
+				height: 22px;
+				font-size: 22px;
+				line-height: 1;
+			}
 		}
 	}
 }
@@ -343,6 +443,13 @@
 .meh-main {
 	flex: 1 1 auto;
 	min-width: 0;
+	margin: 0;
+	padding: 0;
+	/* The one scrolling region in the shell. `min-height: 0` is what allows a
+	   flex child to be shorter than its content and scroll, rather than growing
+	   and pushing the shell past the window. */
+	min-height: 0;
+	overflow-y: auto;
 }
 
 .meh-export-button {
@@ -548,18 +655,28 @@
 	border: 1px solid #dcdcde;
 	border-radius: 4px;
 	background: #fff;
+	/* The header bleeds to this card's edges and has square corners, so without
+	   this its green would sit outside the rounded ones. */
+	overflow: hidden;
 
 	&__head {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		gap: 12px;
+		@include meh-section-bar;
 
+		/* This heading carries the status badge and the test marker inline
+		   beside the name, so it is a flex row in its own right. */
 		h3 {
 			display: flex;
 			align-items: center;
+			flex-wrap: wrap;
 			gap: 8px;
-			margin: 0;
+		}
+
+		/* The identifier is grey where it appears in the siblings list, on
+		   white. On the green bar that grey is about 1:1 against the
+		   background, so here it takes the bar's own colour and is
+		   de-emphasised by size and weight alone. */
+		.meh-detail__id {
+			color: inherit;
 		}
 	}
 

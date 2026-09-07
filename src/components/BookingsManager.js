@@ -1,30 +1,78 @@
 /**
  * BookingsManager — recreates the WP Booking System "Booking Manager" list
- * view: status tabs (All/Pending/Accepted/Trash) with counts, a search + date
- * range + "hide past" toolbar, and the bookings table. Data is read live from
- * WPBS via the REST API.
+ * view: one tab strip (period and status together) with counts, a search +
+ * date range + "hide past" toolbar with an Export CSV link, and the bookings
+ * table — laid out through `HubTable`, the same list shape `EnquiryManager`
+ * uses. Data is read live from WPBS via the REST API.
  *
  * The calendar view and per-booking editing remain in the WP Booking System
  * plugin; the "View" link opens the booking there.
  */
 import { __ } from '@wordpress/i18n';
 import { useState, useEffect, useCallback } from '@wordpress/element';
-import { Spinner, Notice, CheckboxControl } from '@wordpress/components';
+import { Notice, CheckboxControl } from '@wordpress/components';
 import usePolling from '../hooks/usePolling';
 import { getBookings, getCalendars, bookingsExportUrl } from '../api';
+import HubTable from './HubTable';
 
+/**
+ * One tab strip, not two. WPBS's native statuses and the date-based periods
+ * were rendered as separate rows reading the same `counts` object — a status
+ * count and a period count side by side, each labelled "(n)" its own way. That
+ * duplicated the same information rather than offering two independent
+ * filters, so they are one list here: whichever tab is active sets `status`
+ * when it is a WPBS status and `period` otherwise, and the two still combine
+ * server-side exactly as `SourceWpbs::get_bookings()` already allows.
+ */
 const TABS = [
-	{ key: 'all', label: __( 'All', 'marthrown-enquiry-hub' ) },
-	{ key: 'pending', label: __( 'Pending', 'marthrown-enquiry-hub' ) },
-	{ key: 'accepted', label: __( 'Accepted', 'marthrown-enquiry-hub' ) },
-	{ key: 'trash', label: __( 'Trash', 'marthrown-enquiry-hub' ) },
+	{ key: 'all', label: __( 'All', 'marthrown-enquiry-hub' ), filter: 'period' },
+	{
+		key: 'current',
+		label: __( 'Current', 'marthrown-enquiry-hub' ),
+		filter: 'period',
+	},
+	{
+		key: 'upcoming',
+		label: __( 'Upcoming', 'marthrown-enquiry-hub' ),
+		filter: 'period',
+	},
+	{
+		key: 'past',
+		label: __( 'Past', 'marthrown-enquiry-hub' ),
+		filter: 'period',
+	},
+	{
+		key: 'pending',
+		label: __( 'Pending', 'marthrown-enquiry-hub' ),
+		filter: 'status',
+	},
+	{
+		key: 'accepted',
+		label: __( 'Accepted', 'marthrown-enquiry-hub' ),
+		filter: 'status',
+	},
+	{
+		key: 'trash',
+		label: __( 'Trash', 'marthrown-enquiry-hub' ),
+		filter: 'status',
+	},
 ];
 
-const PERIODS = [
-	{ key: 'all', label: __( 'All bookings', 'marthrown-enquiry-hub' ) },
-	{ key: 'current', label: __( 'Current', 'marthrown-enquiry-hub' ) },
-	{ key: 'upcoming', label: __( 'Upcoming', 'marthrown-enquiry-hub' ) },
-	{ key: 'past', label: __( 'Past', 'marthrown-enquiry-hub' ) },
+/**
+ * The list table's columns, in display order.
+ */
+const COLUMNS = [
+	{ key: 'id', label: __( 'ID', 'marthrown-enquiry-hub' ) },
+	{ key: 'calendar', label: __( 'Calendar', 'marthrown-enquiry-hub' ) },
+	{ key: 'guest', label: __( 'Guest', 'marthrown-enquiry-hub' ) },
+	{ key: 'start_date', label: __( 'Start date', 'marthrown-enquiry-hub' ) },
+	{ key: 'end_date', label: __( 'End date', 'marthrown-enquiry-hub' ) },
+	{
+		key: 'stay_length',
+		label: __( 'Stay length', 'marthrown-enquiry-hub' ),
+	},
+	{ key: 'status', label: __( 'Status', 'marthrown-enquiry-hub' ) },
+	{ key: 'actions', label: '' },
 ];
 
 function StatusPill( { status } ) {
@@ -42,8 +90,26 @@ function StatusPill( { status } ) {
 }
 
 export default function BookingsManager() {
+	// Two server-side filters behind one tab strip: the active tab is either a
+	// status or a period, and the other stays at "all" until its own tab is
+	// clicked. `activeTab` is derived from the pair rather than stored
+	// separately, so the two can never disagree about which button is lit.
 	const [ status, setStatus ] = useState( 'all' );
 	const [ period, setPeriod ] = useState( 'all' );
+	const activeTab = 'all' !== status ? status : period;
+
+	const selectTab = ( tab ) => {
+		const chosen = TABS.find( ( t ) => t.key === tab );
+
+		if ( chosen && 'status' === chosen.filter ) {
+			setStatus( tab );
+			setPeriod( 'all' );
+		} else {
+			setStatus( 'all' );
+			setPeriod( tab );
+		}
+	};
+
 	const [ search, setSearch ] = useState( '' );
 	const [ from, setFrom ] = useState( '' );
 	const [ to, setTo ] = useState( '' );
@@ -157,157 +223,116 @@ export default function BookingsManager() {
 				</Notice>
 			) }
 
-			{ error && (
-				<Notice status="error" isDismissible={ false }>
-					{ __( 'Could not load bookings.', 'marthrown-enquiry-hub' ) }
-				</Notice>
-			) }
-
-			{ /* Date-based views: all / current / upcoming / past. */ }
-			<div className="meh-period-tabs">
-				{ PERIODS.map( ( p ) => (
-					<button
-						key={ p.key }
-						type="button"
-						className={ `meh-period-tab${
-							period === p.key ? ' is-active' : ''
-						}` }
-						onClick={ () => setPeriod( p.key ) }
-					>
-						{ p.label }
-						<span className="count">
-							{ p.key === 'all'
-								? counts.all || 0
-								: counts[ p.key ] || 0 }
-						</span>
-					</button>
-				) ) }
-			</div>
-
-			<ul className="subsubsub wpbs-bm-tabs">
-				{ TABS.map( ( tab, i ) => (
-					<li key={ tab.key }>
-						<a
-							href="#"
-							className={ status === tab.key ? 'current' : '' }
-							onClick={ ( e ) => {
-								e.preventDefault();
-								setStatus( tab.key );
-							} }
-						>
-							{ tab.label }{ ' ' }
-							<span className="count">
-								({ counts[ tab.key ] || 0 })
-							</span>
-						</a>
-						{ i < TABS.length - 1 && ' | ' }
-					</li>
-				) ) }
-			</ul>
-
-			<div className="wpbs-bm-toolbar">
-				<input
-					type="search"
-					placeholder={ __( 'Search bookings', 'marthrown-enquiry-hub' ) }
-					value={ search }
-					onChange={ ( e ) => setSearch( e.target.value ) }
-				/>
-				<label className="meh-date-label">
-					{ __( 'From', 'marthrown-enquiry-hub' ) }
-					<input
-						type="date"
-						value={ from }
-						onChange={ ( e ) => setFrom( e.target.value ) }
-					/>
-				</label>
-				<label className="meh-date-label">
-					{ __( 'To', 'marthrown-enquiry-hub' ) }
-					<input
-						type="date"
-						value={ to }
-						onChange={ ( e ) => setTo( e.target.value ) }
-					/>
-				</label>
-				<CheckboxControl
-					label={ __( 'Hide past bookings', 'marthrown-enquiry-hub' ) }
-					checked={ hidePast }
-					onChange={ setHidePast }
-					__nextHasNoMarginBottom
-				/>
-				<a
-					className="button meh-export-button"
-					href={ bookingsExportUrl( {
-						status,
-						period,
-						s: search,
-						from,
-						to,
-						hide_past: hidePast ? 1 : 0,
-					} ) }
-				>
-					{ __( 'Export CSV', 'marthrown-enquiry-hub' ) }
-				</a>
-			</div>
-
-			<table className="widefat striped meh-table wpbs-bm-table">
-				<thead>
-					<tr>
-						<th>{ __( 'ID', 'marthrown-enquiry-hub' ) }</th>
-						<th>{ __( 'Calendar', 'marthrown-enquiry-hub' ) }</th>
-						<th>{ __( 'Guest', 'marthrown-enquiry-hub' ) }</th>
-						<th>{ __( 'Start date', 'marthrown-enquiry-hub' ) }</th>
-						<th>{ __( 'End date', 'marthrown-enquiry-hub' ) }</th>
-						<th>{ __( 'Stay length', 'marthrown-enquiry-hub' ) }</th>
-						<th>{ __( 'Status', 'marthrown-enquiry-hub' ) }</th>
-						<th></th>
-					</tr>
-				</thead>
-				<tbody>
-					{ loading && ! data && (
-						<tr>
-							<td colSpan="8">
-								<Spinner />
-							</td>
-						</tr>
-					) }
-					{ ! loading && items.length === 0 && (
-						<tr>
-							<td colSpan="8">
-								{ __( 'No bookings found.', 'marthrown-enquiry-hub' ) }
-							</td>
-						</tr>
-					) }
-					{ items.map( ( b ) => (
-						<tr key={ b.id }>
-							<td>
-								<span
-									className={ `wpbs-list-table-id wpbs-booking-color-${ b.id % 10 }` }
-								>
-									#{ b.id }
-								</span>
-							</td>
-							<td>{ b.calendar }</td>
-							<td>{ b.guest || '—' }</td>
-							<td>{ b.start_date || '—' }</td>
-							<td>{ b.end_date || '—' }</td>
-							<td>{ b.stay_length || '—' }</td>
-							<td>
-								<StatusPill status={ b.status } />
-							</td>
-							<td className="meh-row-actions">
-								<a
-									className="button"
-									href={ b.view_url }
-									target="_blank"
-									rel="noopener noreferrer"
-								>
-									{ __( 'View', 'marthrown-enquiry-hub' ) }
-								</a>
-							</td>
-						</tr>
-					) ) }
-				</tbody>
-			</table>
+			<HubTable
+				tabs={ TABS.map( ( tab ) => ( {
+					...tab,
+					count: counts[ tab.key ] || 0,
+				} ) ) }
+				activeTab={ activeTab }
+				onTabChange={ selectTab }
+				toolbar={
+					<>
+						<input
+							type="search"
+							placeholder={ __(
+								'Search bookings',
+								'marthrown-enquiry-hub'
+							) }
+							value={ search }
+							onChange={ ( e ) => setSearch( e.target.value ) }
+						/>
+						<label className="meh-date-label">
+							{ __( 'From', 'marthrown-enquiry-hub' ) }
+							<input
+								type="date"
+								value={ from }
+								onChange={ ( e ) => setFrom( e.target.value ) }
+							/>
+						</label>
+						<label className="meh-date-label">
+							{ __( 'To', 'marthrown-enquiry-hub' ) }
+							<input
+								type="date"
+								value={ to }
+								onChange={ ( e ) => setTo( e.target.value ) }
+							/>
+						</label>
+						<CheckboxControl
+							label={ __(
+								'Hide past bookings',
+								'marthrown-enquiry-hub'
+							) }
+							checked={ hidePast }
+							onChange={ setHidePast }
+							__nextHasNoMarginBottom
+						/>
+					</>
+				}
+				exportUrl={ bookingsExportUrl( {
+					status,
+					period,
+					s: search,
+					from,
+					to,
+					hide_past: hidePast ? 1 : 0,
+				} ) }
+				columns={ COLUMNS }
+				rows={ items }
+				rowKey={ ( row ) => row.id }
+				renderCell={ renderBookingCell }
+				loading={ loading && ! data }
+				error={ error }
+				errorText={ __(
+					'Could not load bookings.',
+					'marthrown-enquiry-hub'
+				) }
+				emptyText={ __(
+					'No bookings found.',
+					'marthrown-enquiry-hub'
+				) }
+			/>
 		</section>
 	);
+}
+
+/**
+ * One cell of the bookings list, by column key.
+ *
+ * @param {Object} row    Listed booking.
+ * @param {Object} column `{ key, label }` from COLUMNS.
+ * @return {*} Cell content.
+ */
+function renderBookingCell( row, column ) {
+	switch ( column.key ) {
+		case 'id':
+			return (
+				<span
+					className={ `wpbs-list-table-id wpbs-booking-color-${
+						row.id % 10
+					}` }
+				>
+					#{ row.id }
+				</span>
+			);
+
+		case 'status':
+			return <StatusPill status={ row.status } />;
+
+		case 'actions':
+			return (
+				<span className="meh-row-actions">
+					<a
+						className="button"
+						href={ row.view_url }
+						target="_blank"
+						rel="noopener noreferrer"
+					>
+						{ __( 'View', 'marthrown-enquiry-hub' ) }
+					</a>
+				</span>
+			);
+
+		default:
+			return row[ column.key ] || '—';
+	}
 }

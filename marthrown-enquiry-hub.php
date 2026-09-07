@@ -208,6 +208,7 @@ function meh_require_includes() {
 		'class-rest-enquiries.php',
 		'class-rest-bookings.php',
 		'class-export-bookings.php',
+		'class-export-enquiries.php',
 
 		// UI.
 		'class-settings.php',
@@ -332,6 +333,7 @@ function meh_bootstrap() {
 	\MarthrownEnquiryHub\RestEnquiries::init();
 	\MarthrownEnquiryHub\RestBookings::init();
 	\MarthrownEnquiryHub\ExportBookings::init();
+	\MarthrownEnquiryHub\ExportEnquiries::init();
 	\MarthrownEnquiryHub\AdminPage::init();
 	\MarthrownEnquiryHub\WpbsBanner::init();
 	\MarthrownEnquiryHub\FrontendBookings::init();

@@ -105,6 +105,20 @@ class FrontendBookings {
 			);
 		}
 
+		/*
+		 * The hub is a full-height shell: the window is the app, and only the
+		 * main column scrolls. Core adds `html { margin-top: 32px !important }`
+		 * when the admin bar shows, which would push 32px of that shell off the
+		 * bottom of the screen — including the bottom of the side nav. The header
+		 * already carries Dashboard and Log out links, so the bar earns nothing
+		 * here that is worth that.
+		 *
+		 * Filtered rather than dequeued: this runs on `template_redirect`, before
+		 * `wp_head`, so `is_admin_bar_showing()` never returns true for this
+		 * request and neither the styles nor the markup are emitted.
+		 */
+		add_filter( 'show_admin_bar', '__return_false' );
+
 		self::render_page();
 		exit;
 	}
@@ -146,8 +160,15 @@ class FrontendBookings {
 	<div class="meh-frontend-wrap">
 		<header class="meh-frontend-header">
 			<div class="meh-frontend-brand">
-				<?php echo self::site_logo(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- safe markup from core/escaped below. ?>
-				<h1><?php esc_html_e( 'Bookings & Enquiries', 'marthrown-enquiry-hub' ); ?></h1>
+				<?php
+				/*
+				 * Logo only. The page's heading lives in the hub's own section
+				 * head, where the title sits next to the controls that act on
+				 * it, so repeating it here left the page naming itself twice
+				 * and carrying two competing candidates for its h1.
+				 */
+				echo self::site_logo(); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- safe markup from core/escaped below.
+				?>
 			</div>
 			<p class="meh-frontend-user">
 				<?php

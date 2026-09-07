@@ -269,6 +269,25 @@ export function bookingsExportUrl( filters = {} ) {
 }
 
 /**
+ * Build the CSV export download URL for the current enquiry filters.
+ *
+ * Same admin-post.php base as bookings, a different action and nonce, both
+ * localised by `AdminPage::enqueue_app()` alongside the ones bookings already
+ * used.
+ *
+ * @param {Object} filters { status, s, from, to, date_from, date_to, hide_test }
+ * @return {string}
+ */
+export function enquiriesExportUrl( filters = {} ) {
+	const data = window.mehData || {};
+	return addQueryArgs( data.exportBase, {
+		action: data.enquiriesExportAction,
+		_wpnonce: data.enquiriesExportNonce,
+		...filters,
+	} );
+}
+
+/**
  * A write whose 400 names the fields that need correcting.
  *
  * The rejection is re-thrown as it came, with the per-field map lifted to

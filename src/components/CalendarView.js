@@ -109,9 +109,12 @@ export default function CalendarView() {
 	return (
 		<section className="meh-calendar">
 			<div className="wpbs-plugin-sticky-header">
-				<span className="wpbs-page-heading">
+				{ /* An h1 rather than a span: the site header no longer carries
+				     the page title, so on this view this is the document's only
+				     heading. */ }
+				<h1 className="wpbs-page-heading">
 					{ __( 'Calendar overview', 'marthrown-enquiry-hub' ) }
-				</span>
+				</h1>
 				<div className="meh-calendar-nav">
 					<Button onClick={ () => setMonth( shiftMonth( month, -1 ) ) }>
 						‹

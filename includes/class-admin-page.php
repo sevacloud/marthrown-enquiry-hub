@@ -85,6 +85,14 @@ class AdminPage {
 		// Base staging/banner styles.
 		wp_enqueue_style( 'meh-admin', MEH_PLUGIN_URL . 'assets/admin.css', array(), $version );
 
+		/*
+		 * Dashicons is registered by core but only loaded inside wp-admin, and
+		 * the hub renders on the front end. The booking status pills and the
+		 * settings gear are both dashicon glyphs, so without this they render as
+		 * nothing at all.
+		 */
+		wp_enqueue_style( 'dashicons' );
+
 		wp_localize_script(
 			'meh-app',
 			'mehData',
@@ -97,6 +105,8 @@ class AdminPage {
 				'exportBase'      => esc_url_raw( admin_url( 'admin-post.php' ) ),
 				'exportAction'    => ExportBookings::ACTION,
 				'exportNonce'     => wp_create_nonce( ExportBookings::NONCE ),
+				'enquiriesExportAction' => ExportEnquiries::ACTION,
+				'enquiriesExportNonce'  => wp_create_nonce( ExportEnquiries::NONCE ),
 				// Settings is administrator-only; the side nav hides it otherwise.
 				'isAdmin'         => current_user_can( 'manage_options' ),
 				'settingsUrl'     => esc_url_raw( Settings::url() ),

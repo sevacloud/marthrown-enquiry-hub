@@ -7,16 +7,47 @@
  * and colours come through.
  */
 
+/* A full-height app shell: the page itself does not scroll, the main column
+   does. That is what keeps the side nav's bottom links on screen. Pinned to the
+   bottom of a viewport-height column, they used to sit below the fold until the
+   page had been scrolled — and were unreachable when the content was too short
+   to scroll at all, which is what put them behind the taskbar. */
+html {
+	height: 100%;
+}
+
 body.meh-frontend {
 	margin: 0;
 	padding: 0;
+	height: 100%;
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+}
+
+/* The server-rendered staging banner, a sibling of the wrap. Fixed size, so the
+   shell below it takes the rest. */
+body.meh-frontend > .meh-staging-banner {
+	flex: 0 0 auto;
 }
 
 .meh-frontend-wrap {
-	max-width: 1400px;
-	margin: 0 auto;
-	padding: 24px 20px 60px;
+	/* No page gutter: the app fills the window on a wide monitor. */
+	max-width: none;
+	margin: 0;
+	padding: 0;
 	box-sizing: border-box;
+	flex: 1 1 auto;
+	/* Lets the flex child scroll rather than forcing this to grow. */
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+}
+
+#enquiry-hub-root {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
 }
 
 .meh-frontend-header {
@@ -25,7 +56,8 @@ body.meh-frontend {
 	align-items: center;
 	justify-content: space-between;
 	gap: 12px 24px;
-	margin-bottom: 16px;
+	flex: 0 0 auto;
+	margin-bottom: 0;
 	/* Padding on all sides now the header carries a background of its own; the
 	   bottom border it used to be separated by is redundant against it. */
 	padding: 16px 20px;
@@ -84,7 +116,6 @@ body.meh-frontend {
 .meh-frontend-user {
 	margin: 0;
 	font-size: 13px;
-	opacity: 0.8;
 }
 
 /* Provide WP-admin-like table styling on the front end, since the wp-admin
@@ -116,22 +147,34 @@ body.meh-frontend {
 	background: #fbfbfc;
 }
 
+/* The same skin as the side nav and the status tabs, so an action button and a
+   toggle button read as one family rather than as WordPress admin grey dropped
+   into a branded hub. #097464 on white is 5.7:1, #fbfbff on #097464 is 5.5:1,
+   so both states clear WCAG AA. */
 .meh-frontend .button {
 	display: inline-block;
 	padding: 4px 10px;
-	background: #f6f7f7;
-	border: 1px solid #c3c4c7;
-	border-radius: 3px;
-	color: #2c3338;
+	background: #fff;
+	border: 1px solid #dcdcde;
+	border-radius: 4px;
+	color: #097464;
 	cursor: pointer;
 	font-size: 13px;
 	text-decoration: none;
 }
 
-.meh-frontend .button-primary {
-	background: #2271b1;
-	border-color: #2271b1;
-	color: #fff;
+.meh-frontend .button:hover,
+.meh-frontend .button:focus {
+	border-color: #097464;
+	color: #097464;
+}
+
+.meh-frontend .button-primary,
+.meh-frontend .button-primary:hover,
+.meh-frontend .button-primary:focus {
+	background: #097464;
+	border-color: #097464;
+	color: #fbfbff;
 }
 
 .meh-frontend .button[disabled] {
