@@ -173,6 +173,15 @@
 	background: #f0f0f1;
 	color: #1d2327;
 
+	/* 10px to the left, for a badge that sits right after text with no gap of
+	   its own — the enquiry list's name cell. Not on the base rule: the detail
+	   panel's heading is a flex row already spacing the name, the status badge
+	   and this one 8px apart, and adding a margin there too would double it to
+	   18px. */
+	&--spaced {
+		margin-left: 10px;
+	}
+
 	/* The six lifecycle statuses, plus the staging marker. */
 	&--new {
 		background: #fcf3d7;
@@ -207,9 +216,28 @@
 	}
 }
 
+/* The name cell in the enquiry list. A real <button> for its click/keyboard
+   behaviour, stripped of every trace of that — background, border, padding —
+   so it reads as bold underlined text rather than as a control sitting in the
+   row. */
 .meh-row-open {
+	display: inline;
+	background: none;
+	border: none;
+	margin: 0;
+	padding: 0;
 	text-align: left;
-	font-weight: 600;
+	color: #097464;
+	font-weight: 700;
+	font-size: inherit;
+	font-family: inherit;
+	text-decoration: underline;
+	cursor: pointer;
+
+	&:hover,
+	&:focus {
+		color: #097464;
+	}
 }
 
 .meh-muted {
@@ -269,6 +297,9 @@
 	}
 }
 
+/* Background colour set inline from `row.color` — the calendar's own WPBS
+   legend colour — so the id groups visually by calendar. #2271b1 is the
+   fallback for a calendar with no legend colour configured. */
 .wpbs-list-table-id {
 	display: inline-block;
 	padding: 1px 8px;
@@ -278,12 +309,32 @@
 	background: #2271b1;
 }
 
-/* Colour cycle roughly matching WPBS booking colours. */
-@each $i, $c in (0: #d63638, 1: #dba617, 2: #2271b1, 3: #00a32a, 4: #8c5e58,
-	5: #7c3aed, 6: #0891b2, 7: #be185d, 8: #4d7c0f, 9: #b45309) {
-	.wpbs-booking-color-#{$i} {
-		background: $c;
+/* The key to the id colours above: one swatch per calendar, in the same order
+   and the same colours as `GET /calendars` and the new-booking picker. */
+.wpbs-calendar-legend {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px 14px;
+	margin: 0 0 12px;
+	padding: 0;
+	list-style: none;
+	font-size: 12px;
+	color: #50575e;
+
+	li {
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
 	}
+}
+
+.wpbs-calendar-legend__swatch {
+	display: inline-block;
+	width: 10px;
+	height: 10px;
+	border-radius: 2px;
+	background: #2271b1;
 }
 
 .wpbs-bm-status {

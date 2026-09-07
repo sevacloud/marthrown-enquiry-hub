@@ -240,9 +240,13 @@ function renderEnquiryCell( row, column, setSelectedId ) {
 		case 'name':
 			return (
 				<>
+					{ /* Still a real <button> — a native control keeps click,
+					     Enter/Space and screen-reader semantics for free — but
+					     `meh-row-open` now strips every trace of button chrome,
+					     so it reads as text rather than as a control. */ }
 					<button
 						type="button"
-						className="button-link meh-row-open"
+						className="meh-row-open"
 						onClick={ () =>
 							setSelectedId( Number.parseInt( row.id, 10 ) )
 						}
@@ -250,7 +254,7 @@ function renderEnquiryCell( row, column, setSelectedId ) {
 						{ fullName( row ) }
 					</button>
 					{ row.is_test && (
-						<span className="meh-badge meh-badge--test">
+						<span className="meh-badge meh-badge--test meh-badge--spaced">
 							{ __( 'Test', 'marthrown-enquiry-hub' ) }
 						</span>
 					) }

@@ -197,7 +197,7 @@ export default function BookingsManager() {
 							</select>
 							<button
 								type="button"
-								className="button button-primary"
+								className="button"
 								disabled={ ! newBookingCal }
 								onClick={ openAddBooking }
 							>
@@ -221,6 +221,27 @@ export default function BookingsManager() {
 						'marthrown-enquiry-hub'
 					) }
 				</Notice>
+			) }
+
+			{ /* The ID column's colour groups by calendar; this is the key to
+			     that grouping, using the same calendar list already fetched for
+			     the new-booking picker above. */ }
+			{ calendars.length > 0 && (
+				<ul className="wpbs-calendar-legend">
+					{ calendars.map( ( c ) => (
+						<li key={ c.id }>
+							<span
+								className="wpbs-calendar-legend__swatch"
+								style={
+									c.color
+										? { backgroundColor: c.color }
+										: undefined
+								}
+							></span>
+							{ c.name }
+						</li>
+					) ) }
+				</ul>
 			) }
 
 			<HubTable
@@ -305,11 +326,19 @@ export default function BookingsManager() {
 function renderBookingCell( row, column ) {
 	switch ( column.key ) {
 		case 'id':
+			// Coloured by calendar, not by id: `row.color` is the calendar's own
+			// WPBS legend colour (`SourceWpbs::calendar_colors()`), the same value
+			// `GET /calendars` exposes for the legend above the table. An id-based
+			// hash colour (`id % 10`) carried no information — a booking's colour
+			// changed depending on which id it happened to get, unrelated to
+			// which calendar it was on. Grouping by calendar is what makes the
+			// colour mean something at a glance.
 			return (
 				<span
-					className={ `wpbs-list-table-id wpbs-booking-color-${
-						row.id % 10
-					}` }
+					className="wpbs-list-table-id"
+					style={
+						row.color ? { backgroundColor: row.color } : undefined
+					}
 				>
 					#{ row.id }
 				</span>

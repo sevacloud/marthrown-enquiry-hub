@@ -238,9 +238,7 @@ export default function CalendarView() {
 													href={ item.booking.view_url }
 													target="_blank"
 													rel="noopener noreferrer"
-													className={ `meh-calendar-booking wpbs-booking-color-${
-														item.booking.id % 10
-													} meh-cal-status-${
+													className={ `meh-calendar-booking meh-cal-status-${
 														item.booking.status
 													}` }
 													style={ {
