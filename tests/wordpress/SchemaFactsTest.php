@@ -158,6 +158,24 @@ class SchemaFactsTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The schema version declared in the plugin header agrees with the one the
+	 * schema manager compares against.
+	 *
+	 * `MEH_DB_VERSION` is declared in the main plugin file so the version is
+	 * readable before `includes/` loads, and nothing reads it — which is exactly
+	 * why it drifted from `Schema::CURRENT_VERSION` when the date rows became
+	 * ranges. A constant that documents a fact nobody checks documents it
+	 * wrongly sooner or later, so this checks it.
+	 */
+	public function test_the_declared_schema_version_matches_the_schema_manager() {
+		$this->assertSame(
+			Schema::CURRENT_VERSION,
+			MEH_DB_VERSION,
+			'MEH_DB_VERSION and Schema::CURRENT_VERSION must be kept in step.'
+		);
+	}
+
+	/**
 	 * Requirement 1.9: every absent table is created inside 30 seconds.
 	 */
 	public function test_install_completes_within_thirty_seconds_against_an_empty_database() {

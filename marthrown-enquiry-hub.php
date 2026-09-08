@@ -3,7 +3,7 @@
  * Plugin Name:       Marthrown Enquiry Hub
  * Plugin URI:        https://github.com/marthrown/marthrown-enquiry-hub
  * Description:        Unified hub to manage WP Booking System bookings (current, upcoming, past) and event enquiries. The plugin owns its enquiry tables: the website form posts to the intake webhook, the hub stores and works the enquiry, and FluentCRM Pro — when present — is linked to as the contact record.
- * Version:           0.3.4
+ * Version:           0.3.6
  * Author:            Liamarjit @ Seva Cloud
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Constants
  * -------------------------------------------------------------------------
  */
-define( 'MEH_VERSION', '0.3.4' );
+define( 'MEH_VERSION', '0.3.6' );
 define( 'MEH_PLUGIN_FILE', __FILE__ );
 define( 'MEH_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MEH_PLUGIN_URL', plugin_dir_url( __FILE__ ) );
@@ -34,7 +34,7 @@ define( 'MEH_INCLUDES_DIR', MEH_PLUGIN_DIR . 'includes/' );
  * is readable before includes/ loads; `Schema::CURRENT_VERSION` is the value the
  * schema manager itself compares against and the two are kept in step.
  */
-define( 'MEH_DB_VERSION', 1 );
+define( 'MEH_DB_VERSION', 2 );
 
 // Prefix applied to FluentCRM records created by the staging copy so they can
 // be identified and removed before go-live.
@@ -263,6 +263,14 @@ function meh_activate() {
 	update_option( 'meh_version', MEH_VERSION );
 
 	flush_rewrite_rules();
+
+	// Record that this version's rules are flushed, so the bootstrap check does
+	// not immediately flush a second time over what activation just did.
+	update_option(
+		\MarthrownEnquiryHub\FrontendBookings::FLUSH_OPTION,
+		MEH_VERSION,
+		false
+	);
 }
 
 /**

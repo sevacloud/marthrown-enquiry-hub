@@ -495,17 +495,29 @@ Access is restricted:
   filter.
 - Logged in without permission → `403`.
 - Allowed roles: `administrator`, `manager`, `operations` (administrators always
-  pass). Adjust with the `meh_bookings_allowed_roles` filter:
+  pass). Adjust with the `meh_allowed_roles` filter:
 
 ```php
-add_filter( 'meh_bookings_allowed_roles', function ( $roles ) {
+add_filter( 'meh_allowed_roles', function ( $roles ) {
     $roles[] = 'events_team';
     return $roles;
 } );
 ```
 
-The rewrite rule is registered and flushed on activation. If `/bookings` returns
-a 404 after an update, re-save permalinks (Settings → Permalinks) to flush rules.
+The rewrite rule is registered on every request, but a registered rule only
+answers a URL once a flush has written it into the `rewrite_rules` option. That
+flush used to happen on activation alone — and deployment here is an SFTP file
+mirror that never re-activates the plugin, so `/bookings` 404ed on any
+environment the files were mirrored into, or where anything else flushed the
+rules while this plugin was inactive. Re-saving permalinks was the manual repair.
+
+It is no longer needed. `FrontendBookings::maybe_flush()` runs on `init` and
+flushes once per deployed version, recording the version in the
+`meh_rewrite_version` option so a working route costs nothing on later requests.
+If the rule goes missing after that, it is flushed for once more and then left
+alone, because a rule something else filters away for good must not cost a flush
+on every request. Sites on plain permalinks are skipped entirely — they store no
+rewrite rules at all, and the query var still works: `/?meh_bookings=1`.
 
 ## Staging test records
 
