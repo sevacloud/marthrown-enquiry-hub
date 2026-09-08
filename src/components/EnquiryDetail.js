@@ -850,8 +850,22 @@ export default function EnquiryDetail( {
 						) }
 					</div>
 
-					<div className="meh-detail__section">
-						<h4>{ __( 'History', 'marthrown-enquiry-hub' ) }</h4>
+					{ /* Collapsed by default: the trail is the longest thing on
+					     the panel and the least often wanted, so it would
+					     otherwise push the notes — which are read on every visit
+					     — off the bottom of the screen. A native `details` rather
+					     than a state flag and a button, so it opens with the
+					     keyboard, survives a re-render and is findable by the
+					     browser's own in-page search. */ }
+					<details className="meh-detail__section meh-detail__trail">
+						<summary>
+							<h4>
+								{ __( 'History', 'marthrown-enquiry-hub' ) }
+								<span className="meh-muted meh-detail__trail-count">
+									{ list( enquiry.history ).length }
+								</span>
+							</h4>
+						</summary>
 						{ list( enquiry.history ).length > 0 ? (
 							<ul className="meh-detail__list meh-detail__history">
 								{ list( enquiry.history ).map( ( entry ) => (
@@ -880,7 +894,7 @@ export default function EnquiryDetail( {
 								) }
 							</p>
 						) }
-					</div>
+					</details>
 				</>
 			) }
 		</section>

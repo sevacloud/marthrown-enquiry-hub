@@ -483,6 +483,42 @@ describe( 'EnquiryDetail closure outcome', () => {
 	} );
 } );
 
+describe( 'EnquiryDetail history trail', () => {
+	// The trail is the longest thing on the panel and the least often wanted, so
+	// it is shut on arrival. Asserted through the element's own `open` attribute
+	// rather than through what is on screen, because a closed `details` still
+	// holds its children in the DOM: a test written against visibility would pass
+	// on a trail that was never collapsed at all.
+	it( 'arrives collapsed, with the number of entries showing', async () => {
+		const { container } = await renderPanel( HYDRATED );
+
+		const trail = container.querySelector( '.meh-detail__trail' );
+
+		expect( trail ).toBeTruthy();
+		expect( trail.tagName ).toBe( 'DETAILS' );
+		expect( trail.hasAttribute( 'open' ) ).toBe( false );
+
+		// The count is on the summary, so how much is in there is legible without
+		// opening it.
+		expect(
+			within( trail.querySelector( 'summary' ) ).getByText( '1' )
+		).toBeTruthy();
+	} );
+
+	it( 'shows the entries once it is opened', async () => {
+		const { container } = await renderPanel( HYDRATED );
+
+		const trail = container.querySelector( '.meh-detail__trail' );
+
+		fireEvent.click( trail.querySelector( 'summary' ) );
+
+		expect( trail.hasAttribute( 'open' ) ).toBe( true );
+		expect(
+			within( trail ).getByText( 'Enquiry received.' )
+		).toBeTruthy();
+	} );
+} );
+
 describe( 'EnquiryDetail siblings', () => {
 	it( 'shows what each earlier enquiry from the same email was for', async () => {
 		const { container } = await renderPanel( {

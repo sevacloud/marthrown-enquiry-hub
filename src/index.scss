@@ -975,6 +975,42 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 		}
 	}
 
+	/* The history trail, collapsed until asked for.
+	 *
+	 * The `h4` inside the summary is `inline-flex` so the marker sits on the
+	 * heading's own line: a block-level heading there would drop below the
+	 * triangle and leave it orphaned on a line of its own. */
+	&__trail {
+		> summary {
+			cursor: pointer;
+
+			/* The default outline is drawn around the whole summary box, which is
+			   the full width of the card. Scoped to the heading, the focus ring
+			   follows the text that was actually focused. */
+			&:focus {
+				outline: none;
+			}
+
+			&:focus-visible h4 {
+				outline: 2px solid #2271b1;
+				outline-offset: 2px;
+			}
+
+			h4 {
+				display: inline-flex;
+				align-items: center;
+				gap: 6px;
+			}
+		}
+	}
+
+	/* How many entries there are, so the trail can be left shut without hiding
+	   whether there is anything in it. */
+	&__trail-count {
+		font-size: 11px;
+		font-weight: 400;
+	}
+
 	&__entry-type {
 		margin-left: 6px;
 		padding: 1px 6px;
