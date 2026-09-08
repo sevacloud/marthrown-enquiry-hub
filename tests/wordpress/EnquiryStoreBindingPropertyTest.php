@@ -318,7 +318,7 @@ class EnquiryStoreBindingPropertyTest extends WP_UnitTestCase {
 		$rows[] = $this->store(
 			'subject',
 			$subject,
-			array( Generators::date_at( 1 ), Generators::date_at( 2 ) ),
+			self::days_as_ranges( array( 1, 2 ) ),
 			array(
 				'event_type'       => array( $value, 'wedding' ),
 				'site_exclusivity' => array( 'exclusive-use' ),
@@ -335,7 +335,7 @@ class EnquiryStoreBindingPropertyTest extends WP_UnitTestCase {
 		$twin['email']         = 'twin@example.com';
 		$twin[ $case['twin'] ] = $value;
 
-		$rows[] = $this->store( 'twin', $twin, array( Generators::date_at( 3 ) ), array(), array( 'twin' => true ) );
+		$rows[] = $this->store( 'twin', $twin, self::days_as_ranges( array( 3 ) ), array(), array( 'twin' => true ) );
 
 		// Two decoys: nothing adversarial anywhere, so any appearance of one in a
 		// search result, or any change to one, is the failure this property is for.
@@ -346,7 +346,7 @@ class EnquiryStoreBindingPropertyTest extends WP_UnitTestCase {
 			$rows[] = $this->store(
 				'decoy',
 				$decoy,
-				array( Generators::date_at( 10 + $index ) ),
+				self::days_as_ranges( array( 10 + $index ) ),
 				array(
 					'event_type'       => array( 'birthday' ),
 					'site_exclusivity' => array( 'shared-use' ),
@@ -371,12 +371,12 @@ class EnquiryStoreBindingPropertyTest extends WP_UnitTestCase {
 	 *
 	 * @param string $role    Role this enquiry plays: `subject`, `twin` or `decoy`.
 	 * @param array  $scalars Scalar field values.
-	 * @param array  $dates   Candidate dates, distinct and ascending.
+	 * @param array  $ranges  Candidate date ranges, distinct and in rank order.
 	 * @param array  $terms   Term lists keyed by taxonomy.
 	 * @param array  $payload Payload snapshot.
 	 * @return array
 	 */
-	private function store( $role, array $scalars, array $dates, array $terms, array $payload ) {
+	private function store( $role, array $scalars, array $ranges, array $terms, array $payload ) {
 		global $wpdb;
 
 		$wpdb->last_error = '';
@@ -394,7 +394,7 @@ class EnquiryStoreBindingPropertyTest extends WP_UnitTestCase {
 			)
 		);
 
-		$id = EnquiryStore::create( $enquiry, $dates, $terms, $payload );
+		$id = EnquiryStore::create( $enquiry, $ranges, $terms, $payload );
 
 		$this->assertNotWPError( $id, 'Storing an enquiry carrying adversarial values should succeed.' );
 		$this->assertGreaterThan( 0, $id, 'The store should assign a positive identifier.' );
@@ -409,7 +409,7 @@ class EnquiryStoreBindingPropertyTest extends WP_UnitTestCase {
 			'phone'            => $scalars['phone'],
 			'message'          => $scalars['message'],
 			'source'           => $scalars['source'],
-			'selected_dates'   => $dates,
+			'date_ranges'      => $ranges,
 			'event_type'       => isset( $terms['event_type'] ) ? $terms['event_type'] : array(),
 			'site_exclusivity' => isset( $terms['site_exclusivity'] ) ? $terms['site_exclusivity'] : array(),
 			'payload'          => $payload,
@@ -483,9 +483,9 @@ class EnquiryStoreBindingPropertyTest extends WP_UnitTestCase {
 			}
 
 			$this->assertSame(
-				$expected['selected_dates'],
-				$stored['selected_dates'],
-				'The candidate dates of enquiry ' . $id . ' should be unchanged ' . $context . '.'
+				$expected['date_ranges'],
+				$stored['date_ranges'],
+				'The candidate date ranges of enquiry ' . $id . ' should be unchanged ' . $context . '.'
 			);
 
 			foreach ( array( 'event_type', 'site_exclusivity' ) as $taxonomy ) {
@@ -543,17 +543,17 @@ class EnquiryStoreBindingPropertyTest extends WP_UnitTestCase {
 			'The enquiry table columns should be unchanged ' . $context . '.'
 		);
 
-		$dates = 0;
-		$terms = 0;
+		$ranges = 0;
+		$terms  = 0;
 
 		foreach ( $rows as $row ) {
-			$dates += count( $row['selected_dates'] );
-			$terms += count( $row['event_type'] ) + count( $row['site_exclusivity'] );
+			$ranges += count( $row['date_ranges'] );
+			$terms  += count( $row['event_type'] ) + count( $row['site_exclusivity'] );
 		}
 
 		$expected = array(
 			'enquiries'  => count( $rows ),
-			'dates'      => $dates,
+			'dates'      => $ranges,
 			'terms'      => $terms,
 			'notes'      => 0,
 			'history'    => 0,
@@ -770,5 +770,30 @@ class EnquiryStoreBindingPropertyTest extends WP_UnitTestCase {
 		sort( $values );
 
 		return $values;
+	}
+
+	/**
+	 * Single-day candidate ranges at the given offsets from the base date.
+	 *
+	 * The dates are incidental to this property — what it is about is what an
+	 * adversarial scalar does to the rows around it — so one day per range is
+	 * enough, and distinct offsets keep the seeded rows distinct.
+	 *
+	 * @param int[] $offsets Day offsets from `Generators::BASE_DATE`.
+	 * @return array<int,array{start:string,end:string}>
+	 */
+	private static function days_as_ranges( array $offsets ) {
+		$ranges = array();
+
+		foreach ( $offsets as $offset ) {
+			$day = Generators::date_at( (int) $offset );
+
+			$ranges[] = array(
+				'start' => $day,
+				'end'   => $day,
+			);
+		}
+
+		return $ranges;
 	}
 }

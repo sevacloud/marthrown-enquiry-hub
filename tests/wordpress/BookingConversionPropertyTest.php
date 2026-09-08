@@ -367,7 +367,7 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 
 	/**
 	 * One conversion: the enquiry to convert, the calendar to convert onto, and
-	 * which of the enquiry's candidate dates was agreed.
+	 * which day of the enquiry's candidate ranges was agreed.
 	 *
 	 * @return \Eris\Generator
 	 */
@@ -377,10 +377,10 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 				'first_name'   => Generators::first_name(),
 				'last_name'    => Generators::last_name(),
 				'email'        => Generators::email(),
-				'dates'        => Generators::candidate_dates(),
-				// Reduced against the drawn date count, so every candidate date
-				// is reachable whatever the size of the set.
-				'chosen_index' => \Eris\Generators::choose( 0, Generators::DATES_MAX - 1 ),
+				'ranges'       => Generators::candidate_ranges(),
+				// Reduced against the number of days the drawn ranges cover, so
+				// every candidate day is reachable whatever those ranges are.
+				'chosen_index' => \Eris\Generators::choose( 0, 60 ),
 				'status'       => \Eris\Generators::elements( self::CONVERTIBLE_STATUSES ),
 				'calendar'     => self::calendar(),
 			)
@@ -440,7 +440,7 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 
 	/**
 	 * Write the enquiry to convert: open, holding no booking, carrying every
-	 * generated candidate date.
+	 * generated candidate range.
 	 *
 	 * @param array $scenario The generated scenario.
 	 * @return int
@@ -457,7 +457,7 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 				'status_changed_at' => '2025-06-01 10:00:00',
 				'source'            => 'webhook:property-33',
 			),
-			$scenario['dates']
+			$scenario['ranges']
 		);
 
 		$this->assertIsInt( $id, 'Seeding the enquiry to convert should succeed.' );
@@ -503,15 +503,19 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The candidate date the team agreed, drawn from the enquiry's own set.
+	 * The candidate date the team agreed, drawn from the days the enquiry's own
+	 * ranges cover.
+	 *
+	 * A booking is a single day, so the agreed date is a day inside a range
+	 * rather than a range: any day of any of them is one the enquirer offered.
 	 *
 	 * @param array $scenario The generated scenario.
 	 * @return string `Y-m-d`.
 	 */
 	private static function chosen_date( array $scenario ) {
-		$dates = array_values( $scenario['dates'] );
+		$days = Generators::days_in_ranges( $scenario['ranges'] );
 
-		return (string) $dates[ (int) $scenario['chosen_index'] % count( $dates ) ];
+		return (string) $days[ (int) $scenario['chosen_index'] % count( $days ) ];
 	}
 
 	/**

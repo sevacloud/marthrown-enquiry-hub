@@ -3,7 +3,7 @@
  * Unit tests for `EnquiryStore::update()`, the correction primitive.
  *
  * The worked examples behind Requirement 19's store half: a partial write, a
- * null versus an array candidate-date set, a null taxonomy, the columns a
+ * null versus an array candidate-range list, a null taxonomy, the columns a
  * correction never writes, the no-op that issues no statement at all, and a
  * failure part-way through leaving every stored value as it was — on a
  * transactional engine and on one without transactions.
@@ -33,6 +33,25 @@ class EnquiryStoreUpdateTest extends WP_UnitTestCase {
 	 * Store table sitting in the same test database.
 	 */
 	const PREFIX_SEGMENT = 'mehup_';
+
+	/**
+	 * The candidate date ranges every seeded enquiry holds.
+	 *
+	 * A multi-day ideal range first, then a single day as the alternative: the
+	 * two shapes a range takes, in the rank order the store has to keep.
+	 *
+	 * @var array<int,array{start:string,end:string}>
+	 */
+	const SEEDED_RANGES = array(
+		array(
+			'start' => '2025-08-16',
+			'end'   => '2025-08-18',
+		),
+		array(
+			'start' => '2025-08-23',
+			'end'   => '2025-08-23',
+		),
+	);
 
 	/**
 	 * The WordPress table prefix in force outside this test.
@@ -150,7 +169,7 @@ class EnquiryStoreUpdateTest extends WP_UnitTestCase {
 		$this->assertSame( 95, $after['total_guests'] );
 
 		// Every field absent from the request keeps its stored value.
-		foreach ( array( 'first_name', 'last_name', 'phone', 'message', 'selected_dates', 'event_type', 'site_exclusivity' ) as $field ) {
+		foreach ( array( 'first_name', 'last_name', 'phone', 'message', 'date_ranges', 'event_type', 'site_exclusivity' ) as $field ) {
 			$this->assertSame( $before[ $field ], $after[ $field ], sprintf( '%s should be untouched.', $field ) );
 		}
 
@@ -190,44 +209,96 @@ class EnquiryStoreUpdateTest extends WP_UnitTestCase {
 	}
 
 	/* ---------------------------------------------------------------------
-	 * Candidate dates and terms
+	 * Candidate date ranges and terms
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * A null candidate-date set leaves the stored set alone; an array replaces it
-	 * wholesale.
+	 * A null candidate-range list leaves the stored list alone; an array replaces
+	 * it wholesale, in the order submitted.
 	 *
 	 * @return void
 	 */
-	public function test_update_leaves_dates_alone_when_null_and_replaces_them_when_given() {
+	public function test_update_leaves_ranges_alone_when_null_and_replaces_them_when_given() {
 		$id = $this->seed_enquiry();
 
 		$untouched = EnquiryStore::update( $id, array( 'phone' => '07700 900999' ), null );
 
 		$this->assertSame( array( 'phone' ), array_keys( $untouched['changed'] ) );
 		$this->assertSame(
-			array( '2025-08-16', '2025-08-23' ),
-			EnquiryStore::find( $id )['selected_dates'],
-			'A null date set is "not submitted", not "clear the set".'
+			self::SEEDED_RANGES,
+			EnquiryStore::find( $id )['date_ranges'],
+			'A null range list is "not submitted", not "clear the list".'
 		);
 
-		// The replacement drops one stored date and adds two, which is what
-		// "replaced wholesale rather than diffed" means.
-		$replaced = EnquiryStore::update( $id, array(), array( '2025-09-13', '2025-08-16', '2025-09-06' ) );
+		// The replacement drops one stored range and adds two, which is what
+		// "replaced wholesale rather than diffed" means. The bare date is the
+		// single-day range it names, and the ideal range is the one submitted
+		// first, so the submitted order is the stored order.
+		$replaced = EnquiryStore::update(
+			$id,
+			array(),
+			array(
+				array(
+					'start' => '2025-09-13',
+					'end'   => '2025-09-14',
+				),
+				'2025-08-16',
+				array(
+					'start' => '2025-09-06',
+					'end'   => '2025-09-06',
+				),
+			)
+		);
+
+		$expected = array(
+			array(
+				'start' => '2025-09-13',
+				'end'   => '2025-09-14',
+			),
+			array(
+				'start' => '2025-08-16',
+				'end'   => '2025-08-16',
+			),
+			array(
+				'start' => '2025-09-06',
+				'end'   => '2025-09-06',
+			),
+		);
 
 		$this->assertSame(
 			array(
-				'from' => array( '2025-08-16', '2025-08-23' ),
-				'to'   => array( '2025-08-16', '2025-09-06', '2025-09-13' ),
+				'from' => self::SEEDED_RANGES,
+				'to'   => $expected,
 			),
-			$replaced['changed']['selected_dates'],
-			'The date set should be compared and reported as a set.'
+			$replaced['changed']['date_ranges'],
+			'The range list should be compared and reported as a list, rank order and all.'
 		);
 
+		$this->assertSame( $expected, EnquiryStore::find( $id )['date_ranges'] );
+	}
+
+	/**
+	 * Reordering the stored ranges is a change, because the first range is the
+	 * ideal one.
+	 *
+	 * @return void
+	 */
+	public function test_update_treats_a_reordered_range_list_as_a_change() {
+		$id = $this->seed_enquiry();
+
+		$reversed = array_reverse( self::SEEDED_RANGES );
+		$result   = EnquiryStore::update( $id, array(), $reversed );
+
 		$this->assertSame(
-			array( '2025-08-16', '2025-09-06', '2025-09-13' ),
-			EnquiryStore::find( $id )['selected_dates']
+			array(
+				'from' => self::SEEDED_RANGES,
+				'to'   => $reversed,
+			),
+			$result['changed']['date_ranges'],
+			'A reordering is a change: which range is the ideal one has changed.'
 		);
+
+		$this->assertSame( $reversed, EnquiryStore::find( $id )['date_ranges'] );
 	}
 
 	/**
@@ -244,6 +315,39 @@ class EnquiryStoreUpdateTest extends WP_UnitTestCase {
 
 		$this->assertWPError( $result );
 		$this->assertSame( 400, $result->get_error_data()['status'] );
+		$this->assertSame( $before, EnquiryStore::find( $id ), 'Every stored value should be as it was.' );
+	}
+
+	/**
+	 * A range missing one bound, and a range ending before it starts, each fail
+	 * the correction with nothing written: neither is a range, and guessing at
+	 * the bound the enquirer meant is not the store's business.
+	 *
+	 * @return void
+	 */
+	public function test_update_rejects_a_half_drawn_or_reversed_range_without_writing() {
+		$id     = $this->seed_enquiry();
+		$before = EnquiryStore::find( $id );
+
+		$half = EnquiryStore::update( $id, array( 'email' => 'grace@example.com' ), array( array( 'start' => '2026-01-31' ) ) );
+
+		$this->assertWPError( $half, 'A range naming only its first day should be refused.' );
+		$this->assertSame( 400, $half->get_error_data()['status'] );
+
+		$reversed = EnquiryStore::update(
+			$id,
+			array( 'email' => 'grace@example.com' ),
+			array(
+				array(
+					'start' => '2026-02-14',
+					'end'   => '2026-02-07',
+				),
+			)
+		);
+
+		$this->assertWPError( $reversed, 'A range ending before it starts should be refused.' );
+		$this->assertSame( 400, $reversed->get_error_data()['status'] );
+
 		$this->assertSame( $before, EnquiryStore::find( $id ), 'Every stored value should be as it was.' );
 	}
 
@@ -367,9 +471,23 @@ class EnquiryStoreUpdateTest extends WP_UnitTestCase {
 				'total_guests' => 80,
 				'message'      => 'A summer weekend, ideally.',
 			),
-			// The same sets, differently ordered and with a repeat: still the same
-			// sets, so still no change.
-			array( '2025-08-23', '2025-08-16', '2025-08-16' ),
+			// The same ranges in the same order, with a repeat: naming a range
+			// twice names it once, so still no change. Reordering them would be
+			// one, which is what the test above says.
+			array(
+				array(
+					'start' => '2025-08-16',
+					'end'   => '2025-08-18',
+				),
+				array(
+					'start' => '2025-08-16',
+					'end'   => '2025-08-18',
+				),
+				array(
+					'start' => '2025-08-23',
+					'end'   => '2025-08-23',
+				),
+			),
 			array(
 				'event_type'       => array( 'reception', 'wedding', 'wedding' ),
 				'site_exclusivity' => array( 'whole_site' ),
@@ -458,7 +576,7 @@ class EnquiryStoreUpdateTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Apply a correction touching scalars, dates and terms whose first term insert
+	 * Apply a correction touching scalars, ranges and terms whose first term insert
 	 * fails.
 	 *
 	 * @param int $id Enquiry identifier.
@@ -568,7 +686,7 @@ class EnquiryStoreUpdateTest extends WP_UnitTestCase {
 
 		$id = EnquiryStore::create(
 			array_merge( $defaults, $fields ),
-			array( '2025-08-23', '2025-08-16' ),
+			self::SEEDED_RANGES,
 			array(
 				'event_type'       => array( 'wedding', 'reception' ),
 				'site_exclusivity' => array( 'whole_site' ),

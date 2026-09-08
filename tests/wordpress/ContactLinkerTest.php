@@ -353,17 +353,27 @@ class ContactLinkerTest extends WP_UnitTestCase {
 		$this->crm->reset();
 
 		$changed = array(
-			'message'        => array(
+			'message'      => array(
 				'from' => '',
 				'to'   => 'Now with detail.',
 			),
-			'total_guests'   => array(
+			'total_guests' => array(
 				'from' => 40,
 				'to'   => 60,
 			),
-			'selected_dates' => array(
-				'from' => array( '2025-08-16' ),
-				'to'   => array( '2025-08-23' ),
+			'date_ranges'  => array(
+				'from' => array(
+					array(
+						'start' => '2025-08-16',
+						'end'   => '2025-08-16',
+					),
+				),
+				'to'   => array(
+					array(
+						'start' => '2025-08-23',
+						'end'   => '2025-08-24',
+					),
+				),
 			),
 		);
 

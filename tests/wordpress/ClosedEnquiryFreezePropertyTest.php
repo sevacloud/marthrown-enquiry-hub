@@ -6,7 +6,7 @@
  * `closed`, any write route — the status route, the note route, the enquiry edit
  * route `PATCH /enquiries/{id}`, the conversion route and the CRM retry route —
  * and any request body, valid or invalid, the API responds 409 and the enquiry's
- * stored fields, candidate dates, terms, notes and history are byte-identical
+ * stored fields, candidate date ranges, terms, notes and history are byte-identical
  * afterwards; and the list and single-enquiry read routes continue to return that
  * enquiry's stored values, notes and history in full.
  *
@@ -45,7 +45,7 @@
  *   a property of the HTTP surface rather than a claim about call order.
  * - **"Byte-identical" is asserted as a whole-row comparison**, not as a list of
  *   fields: the hydrated enquiry is read before the five requests and after them,
- *   and the two must be identical — which covers the candidate dates, both
+ *   and the two must be identical — which covers the candidate ranges, both
  *   taxonomies, `updated_at`, `status_changed_at`, `booking_id` and
  *   `crm_sync_state` in one assertion, including a column this test did not think
  *   to name. Notes and history are compared verbatim as well, entries and all,
@@ -58,7 +58,7 @@
  *   there.
  * - **Reading is asserted after the five refusals** (Requirement 9.2), on both
  *   read routes: `GET /enquiries/{id}` answers 200 and its representation carries
- *   the stored field values, the candidate dates, the terms, every note and every
+ *   the stored field values, the candidate ranges, the terms, every note and every
  *   history entry, and `GET /enquiries` still lists the enquiry.
  * - **The case generator is wide**, and Eris shrinks a wide composite generator
  *   by building the cartesian product of every component's alternatives, which
@@ -138,7 +138,7 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 	/**
 	 * The candidate date no generated enquiry offers.
 	 *
-	 * `Generators::candidate_dates()` counts forward from its own fixed base date,
+	 * `Generators::candidate_ranges()` counts forward from its own fixed base date,
 	 * so a date well before it can never be among an enquiry's candidates. That is
 	 * what makes the conversion route's invalid body genuinely invalid.
 	 */
@@ -161,8 +161,8 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 		'edit'      => 'PATCH',
 	);
 
-	/** Most candidate dates one generated enquiry holds. */
-	const DATES_MAX = 4;
+	/** Most candidate date ranges one generated enquiry holds. */
+	const RANGES_MAX = 3;
 
 	/** Most notes and history entries one generated enquiry holds. */
 	const ENTRIES_MAX = 2;
@@ -341,7 +341,7 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 			);
 		}
 
-		// Requirement 9.1: the enquiry, its dates, its terms, its notes and its
+		// Requirement 9.1: the enquiry, its ranges, its terms, its notes and its
 		// history are as they were, to the byte.
 		$this->assertSame( $before, EnquiryStore::find( $id ), 'The closed enquiry is unchanged. ' . $label );
 		$this->assertSame( $notes, NoteService::for_enquiry( $id ), 'The notes are unchanged. ' . $label );
@@ -367,7 +367,9 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 
 		$this->assertSame( 200, $response->get_status(), 'A closed enquiry is still readable. ' . $label );
 
-		foreach ( array( 'id', 'first_name', 'last_name', 'email', 'phone', 'total_guests', 'message', 'status', 'created_at', 'booking_id' ) as $field ) {
+		// `date_ranges` belongs with the scalars rather than with the term sets
+		// below: rank order is part of the value, so it is compared as it stands.
+		foreach ( array( 'id', 'first_name', 'last_name', 'email', 'phone', 'total_guests', 'message', 'status', 'created_at', 'booking_id', 'date_ranges' ) as $field ) {
 			$this->assertSame(
 				$stored[ $field ],
 				$single[ $field ],
@@ -375,7 +377,7 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 			);
 		}
 
-		foreach ( array( 'selected_dates', 'event_type', 'site_exclusivity' ) as $field ) {
+		foreach ( array( 'event_type', 'site_exclusivity' ) as $field ) {
 			$this->assertSame(
 				self::as_set( $stored[ $field ] ),
 				self::as_set( $single[ $field ] ),
@@ -410,7 +412,7 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * One closed enquiry: its field values, its dates and terms, its CRM state,
+	 * One closed enquiry: its field values, its ranges and terms, its CRM state,
 	 * its booking, how many notes and history entries it holds, and whether the
 	 * bodies offered to the frozen routes are ones those routes would otherwise
 	 * have accepted.
@@ -426,7 +428,7 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 				'phone'            => Generators::phone_or_empty(),
 				'total_guests'     => Generators::total_guests_or_unsupplied(),
 				'message'          => Generators::message_or_empty(),
-				'dates'            => Generators::candidate_dates( 1, self::DATES_MAX ),
+				'ranges'           => Generators::candidate_ranges( 1, self::RANGES_MAX ),
 				'event_type'       => Generators::term_set( 0, 3 ),
 				'site_exclusivity' => Generators::term_set( 0, 2 ),
 				'subscriber'       => \Eris\Generators::elements( array( 0, 501 ) ),
@@ -482,7 +484,7 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 	 */
 	private function body( $route, array $case ) {
 		$valid = (bool) $case['valid_body'];
-		$dates = array_values( (array) $case['dates'] );
+		$days = Generators::days_in_ranges( (array) $case['ranges'] );
 
 		switch ( $route ) {
 			case 'status':
@@ -496,7 +498,7 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 			case 'convert':
 				return array(
 					'calendar_id' => 1,
-					'date'        => $valid ? $dates[0] : self::NON_CANDIDATE,
+					'date'        => $valid ? $days[0] : self::NON_CANDIDATE,
 				);
 
 			case 'edit':
@@ -580,7 +582,7 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 				'source'                  => self::SOURCE,
 				'is_test'                 => $case['is_test'] ? 1 : 0,
 			),
-			(array) $case['dates'],
+			(array) $case['ranges'],
 			array(
 				'event_type'       => (array) $case['event_type'],
 				'site_exclusivity' => (array) $case['site_exclusivity'],
@@ -621,7 +623,7 @@ class ClosedEnquiryFreezePropertyTest extends WP_UnitTestCase {
 				'subscriber' => (int) $case['subscriber'],
 				'crm_state'  => $case['crm_state'],
 				'booking'    => (int) $case['booking'],
-				'dates'      => count( (array) $case['dates'] ),
+				'ranges'     => count( (array) $case['ranges'] ),
 				'terms'      => count( (array) $case['event_type'] ) + count( (array) $case['site_exclusivity'] ),
 				'notes'      => (int) $case['notes'],
 				'entries'    => (int) $case['entries'],

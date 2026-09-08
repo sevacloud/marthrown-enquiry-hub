@@ -54,7 +54,7 @@ export function getEnquiry( id ) {
  * A 400 rejection carries a per-field `errors` map, reachable on the thrown
  * error as `error.errors` as well as at its `data.errors` origin.
  *
- * @param {Object} fields { first_name, last_name, email, selected_dates, … }
+ * @param {Object} fields { first_name, last_name, email, date_ranges, … }
  * @return {Promise<Object>} The created enquiry.
  */
 export function createEnquiry( fields = {} ) {

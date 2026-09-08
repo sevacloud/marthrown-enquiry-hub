@@ -38,7 +38,7 @@
  *   here by a plain sort, so a sibling list that included the subject, omitted a
  *   sharer, admitted a stranger, or carried more than the identifier,
  *   `created_at` and status would fail (Requirement 13.3).
- * - The case generator is wide — a whole enquiry, up to ten candidate dates, two
+ * - The case generator is wide — a whole enquiry, up to three candidate ranges, two
  *   term sets, notes, history entries and two sibling populations — and Eris
  *   shrinks a generator that wide by building the cartesian product of every
  *   component's alternatives, which exhausts memory long before it reports
@@ -153,7 +153,7 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 		'is_test',
 		'duplicated_from_id',
 		'duplicated_to_id',
-		'selected_dates',
+		'date_ranges',
 		'event_type',
 		'site_exclusivity',
 		'payload',
@@ -337,11 +337,11 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 					$this->clear();
 
 					$stored  = self::stored_values( $case );
-					$dates   = $case['dates'];
+					$ranges  = $case['ranges'];
 					$terms   = self::terms( $case );
-					$payload = self::payload( $stored, $dates, $terms );
+					$payload = self::payload( $stored, $ranges, $terms );
 
-					$id = $this->write( $stored, $dates, $terms, $payload );
+					$id = $this->write( $stored, $ranges, $terms, $payload );
 
 					// Requirement 13.3 needs all three populations: the enquiry,
 					// the enquiries sharing its email, and enquiries sharing
@@ -359,8 +359,8 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 					$this->assertSame( 200, $response->get_status(), 'The route should answer 200.' . $context );
 
 					// Requirement 13.2: every stored field value, the candidate
-					// dates and both multi-selects as sets.
-					$this->assert_stored_values( self::expected( $id, $stored, $dates, $terms, $payload ), $data, $context );
+					// ranges as a ranked list and both multi-selects as sets.
+					$this->assert_stored_values( self::expected( $id, $stored, $ranges, $terms, $payload ), $data, $context );
 
 					// Requirement 13.2: every note, every history entry, the
 					// linked booking identifier and the contact URL.
@@ -388,7 +388,7 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * One case: a whole enquiry, its candidate dates and term sets, the notes and
+	 * One case: a whole enquiry, its candidate ranges and term sets, the notes and
 	 * history entries to append, and the two sibling populations.
 	 *
 	 * The child populations are generated at full width and sliced to a generated
@@ -415,7 +415,7 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 				'created_at'              => self::stamp(),
 				'updated_at'              => self::stamp(),
 				'status_changed_at'       => self::stamp(),
-				'dates'                   => Generators::candidate_dates(),
+				'ranges'                  => Generators::candidate_ranges(),
 				'event_type'              => Generators::term_set( 0, self::TERMS_MAX ),
 				'site_exclusivity'        => Generators::term_set( 0, self::TERMS_MAX ),
 				'notes'                   => \Eris\Generators::vector( self::CHILD_MAX, self::note_body() ),
@@ -589,16 +589,16 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 	 * would trace nothing.
 	 *
 	 * @param array $stored Scalar column values.
-	 * @param array $dates  Candidate dates.
+	 * @param array $ranges Candidate date ranges.
 	 * @param array $terms  Term lists keyed by taxonomy.
 	 * @return array
 	 */
-	protected static function payload( array $stored, array $dates, array $terms ) {
+	protected static function payload( array $stored, array $ranges, array $terms ) {
 		return array(
 			'submitted' => array(
 				'Your name'      => $stored['first_name'] . ' ' . $stored['last_name'],
 				'Email'          => $stored['email'],
-				'Preferred date' => implode( ', ', $dates ),
+				'Preferred date' => implode( ', ', wp_list_pluck( $ranges, 'start' ) ),
 				'Event type'     => array_values( $terms['event_type'] ),
 			),
 			'meta'      => array(
@@ -614,12 +614,12 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 	 *
 	 * @param int   $id      Enquiry identifier.
 	 * @param array $stored  Scalar column values that were written.
-	 * @param array $dates   Candidate dates that were written.
+	 * @param array $ranges  Candidate date ranges that were written.
 	 * @param array $terms   Term lists that were written.
 	 * @param array $payload Payload snapshot that was written.
 	 * @return array<string,mixed>
 	 */
-	protected static function expected( $id, array $stored, array $dates, array $terms, array $payload ) {
+	protected static function expected( $id, array $stored, array $ranges, array $terms, array $payload ) {
 		$expected = array(
 			'id'                      => (int) $id,
 			'total_guests'            => self::expected_number( $stored['total_guests'] ),
@@ -628,7 +628,7 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 			'is_test'                 => (bool) $stored['is_test'],
 			'duplicated_from_id'      => null,
 			'duplicated_to_id'        => null,
-			'selected_dates'          => self::set( $dates ),
+			'date_ranges'             => array_values( $ranges ),
 			'event_type'              => self::set( $terms['event_type'] ),
 			'site_exclusivity'        => self::set( $terms['site_exclusivity'] ),
 			'payload'                 => $payload,
@@ -664,8 +664,8 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * Every stored field value reaches the representation, the candidate dates
-	 * and both multi-selects as sets (Requirement 13.2).
+	 * Every stored field value reaches the representation, the candidate ranges as
+	 * a ranked list and both multi-selects as sets (Requirement 13.2).
 	 *
 	 * @param array  $expected Expected representation.
 	 * @param array  $data     Response body.
@@ -677,7 +677,19 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 			$this->assertArrayHasKey( $field, $data, sprintf( 'The representation should carry `%s`.', $field ) . $context );
 		}
 
-		foreach ( array( 'selected_dates', 'event_type', 'site_exclusivity' ) as $field ) {
+		// The ranked list, compared as it stands: the ideal range comes first, so
+		// order is part of what the representation has to carry.
+		$this->assertIsArray( $data['date_ranges'], '`date_ranges` should be a list.' . $context );
+
+		$this->assertSame(
+			$expected['date_ranges'],
+			array_values( (array) $data['date_ranges'] ),
+			'`date_ranges` should be the written list, in the written order.' . $context
+		);
+
+		unset( $expected['date_ranges'], $data['date_ranges'] );
+
+		foreach ( array( 'event_type', 'site_exclusivity' ) as $field ) {
 			$this->assertIsArray( $data[ $field ], sprintf( '`%s` should be a list.', $field ) . $context );
 
 			$this->assertSame(
@@ -995,7 +1007,7 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 				'crm'        => $stored['crm_sync_state'],
 				'subscriber' => $stored['fluentcrm_subscriber_id'],
 				'booking'    => $stored['booking_id'],
-				'dates'      => count( $case['dates'] ),
+				'ranges'     => count( $case['ranges'] ),
 				'terms'      => array( count( $case['event_type'] ), count( $case['site_exclusivity'] ) ),
 				'notes'      => (int) $case['notes_count'],
 				'history'    => (int) $case['history_count'],
@@ -1027,13 +1039,13 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 	 * Write one enquiry through the store and return its identifier.
 	 *
 	 * @param array $stored  Scalar column values.
-	 * @param array $dates   Candidate dates.
+	 * @param array $ranges  Candidate date ranges.
 	 * @param array $terms   Term lists keyed by taxonomy.
 	 * @param array $payload Payload snapshot.
 	 * @return int
 	 */
-	private function write( array $stored, array $dates = array(), array $terms = array(), array $payload = array() ) {
-		$id = EnquiryStore::create( $stored, $dates, $terms, $payload );
+	private function write( array $stored, array $ranges = array(), array $terms = array(), array $payload = array() ) {
+		$id = EnquiryStore::create( $stored, $ranges, $terms, $payload );
 
 		$this->assertNotWPError( $id, 'Storing the enquiry should succeed.' );
 		$this->assertGreaterThan( 0, (int) $id, 'A stored enquiry should hold a positive identifier.' );

@@ -93,28 +93,27 @@ class IntakeEndpoint {
 	const SOURCE_FIELD_OPTION = 'meh_intake_source_field';
 
 	/**
-	 * Options naming the payload fields holding a start/end date pair.
+	 * Options naming the payload fields holding the ideal start/end date pair.
 	 *
-	 * A sending form can be configured, instead of delivering `selected_dates`
-	 * as a list, to deliver a start date and an end date that together name a
-	 * range. Both options have to hold a non-empty value, and both configured
-	 * fields have to resolve to a parseable date, for the range to expand: a
-	 * site that has configured neither is unaffected, which is what keeps this
-	 * additive rather than a change to how `selected_dates` behaves for every
-	 * existing sender.
+	 * A sending form's webhook action offers no way to submit a date range as one
+	 * field, so a range arrives as two: a start date and an end date in separate
+	 * payload fields. Both options have to hold a non-empty value, and both
+	 * configured fields have to resolve to a parseable date, for a range to be
+	 * read.
 	 */
 	const START_DATE_FIELD_OPTION = 'meh_intake_start_date_field';
 	const END_DATE_FIELD_OPTION   = 'meh_intake_end_date_field';
 
 	/**
-	 * The longest range `expand_date_range()` will expand.
+	 * Options naming the payload fields holding the two optional alternatives.
 	 *
-	 * The Validator's own MAX_DATES (10) rejects anything this long once
-	 * `selected_dates` reaches it, so this bound exists only to stop a
-	 * mistyped multi-year range from building a very large array before that
-	 * rejection is reached.
+	 * The ideal range keeps the original option names, so a site configured
+	 * before alternatives existed keeps working with nothing to re-enter.
 	 */
-	const MAX_RANGE_DAYS = 366;
+	const ALTERNATIVE_DATE_FIELD_OPTIONS = array(
+		array( 'meh_intake_start_date_field_2', 'meh_intake_end_date_field_2' ),
+		array( 'meh_intake_start_date_field_3', 'meh_intake_end_date_field_3' ),
+	);
 
 	/**
 	 * Prefix applied to a resolved form identifier to form `source`.
@@ -138,9 +137,12 @@ class IntakeEndpoint {
 	 * The enquiry fields a sender may deliver as a delimited string.
 	 *
 	 * Every other field is single-valued, so splitting it would corrupt a
-	 * legitimate value — a `message` mentioning a comma, above all.
+	 * legitimate value — a `message` mentioning a comma, above all. `date_ranges`
+	 * is not among them either, and cannot be: a delimited string has no way to
+	 * say where one range ends and the next begins, which is why ranges arrive as
+	 * configured pairs of fields instead.
 	 */
-	const MULTI_VALUE_FIELDS = array( 'selected_dates', 'event_type', 'site_exclusivity' );
+	const MULTI_VALUE_FIELDS = array( 'event_type', 'site_exclusivity' );
 
 	/**
 	 * Delimiters a sender may use inside a multi-value field.
@@ -627,84 +629,104 @@ class IntakeEndpoint {
 	 *
 	 * JSON or form-encoded, nested or flat, `label`/`value` pairs or plain
 	 * key-value: every shape collapses to one map of submitted key or label =>
-	 * value, and the three multi-value fields arrive as lists whether the
-	 * sender delivered an array or a delimited string. That is what makes two
-	 * senders carrying the same values produce the same enquiry
-	 * (Requirement 2.12).
+	 * value, the two multi-value fields arrive as lists whether the sender
+	 * delivered an array or a delimited string, and the configured start/end
+	 * field pairs arrive as `date_ranges`. That is what makes two senders carrying
+	 * the same values produce the same enquiry (Requirement 2.12).
 	 *
 	 * @param \WP_REST_Request $request Incoming request.
 	 * @return array<string,mixed>
 	 */
 	public static function normalise( $request ) {
 		$flat = self::flatten( self::body( $request ) );
-		$flat = self::expand_date_range( $flat );
+		$flat = self::collect_date_ranges( $flat );
 
 		return self::split_multi_values( $flat );
 	}
 
 	/**
-	 * Expand a configured start/end date pair into `selected_dates`.
+	 * Gather the configured start/end date pairs into `date_ranges`.
 	 *
-	 * A sending form's webhook action offers no way to submit a date range as
-	 * a single field carrying every night in it, so where the site is
-	 * configured to receive a start date and an end date as two separate
-	 * payload fields, this turns that pair into the day list `selected_dates`
-	 * has always been (Requirements 3.5-adjacent: candidate dates remain a
-	 * set, this only changes what a sender may submit to populate it).
+	 * A sending form's webhook action offers no way to submit a date range as a
+	 * single field, so each range arrives as two payload fields named in Settings:
+	 * the ideal pair, then up to two alternative pairs. This collects whichever of
+	 * them the request carried into the one `date_ranges` list the Validator and
+	 * the store speak in, ideal range first.
 	 *
-	 * Both `self::START_DATE_FIELD_OPTION` and `self::END_DATE_FIELD_OPTION`
-	 * have to be configured, and both configured fields have to be present in
-	 * the payload and parse as a date, or nothing here does anything: a
-	 * half-configured site, or a request missing one half of the pair, leaves
-	 * the payload untouched for the existing `selected_dates` handling to read
-	 * as it always has (which, finding nothing, reports `too_few_dates` — the
-	 * same failure an omitted `selected_dates` already produces).
+	 * A pair is read only when both its options are configured, both fields are
+	 * present in the payload, and both parse as a date. Anything less is skipped
+	 * rather than half-read: an alternative pair the visitor left blank is the
+	 * ordinary case, and one where only the start arrived is a range whose end
+	 * nobody named. Skipping every pair leaves no `date_ranges` at all, which the
+	 * Validator reports as `too_few_ranges` — the same failure an omitted field
+	 * produces, which is what it is.
 	 *
-	 * `selected_dates` in the payload is left alone when the sender already
-	 * supplied one: a start/end pair sent alongside an explicit
-	 * `selected_dates` is not a shape any real sender produces, and preferring
-	 * the field the sender actually populated is the safer reading of an
-	 * ambiguous payload.
+	 * An explicit `date_ranges` in the payload wins outright: a sender populating
+	 * it has said what it means more directly than a configured field name can,
+	 * and preferring the field the sender actually filled in is the safer reading
+	 * of an ambiguous payload.
 	 *
-	 * The two source fields are removed from the flat map once expanded, so
-	 * they cannot be mistaken for `selected_dates` (or anything else) by the
-	 * label-matching FieldMapper falls back to.
+	 * The source fields are removed from the flat map once read, so they cannot be
+	 * mistaken for another field by the label matching `FieldMapper` falls back
+	 * to.
 	 *
 	 * @param array $flat Flattened field map.
 	 * @return array<string,mixed>
 	 */
-	protected static function expand_date_range( array $flat ) {
-		$start_field = self::configured_date_field( self::START_DATE_FIELD_OPTION );
-		$end_field   = self::configured_date_field( self::END_DATE_FIELD_OPTION );
+	protected static function collect_date_ranges( array $flat ) {
+		$existing = self::matching_key( $flat, 'date_ranges' );
 
-		if ( '' === $start_field || '' === $end_field ) {
+		if ( null !== $existing && ! self::is_empty_value( $flat[ $existing ] ) ) {
 			return $flat;
 		}
 
-		$start_key = self::matching_key( $flat, $start_field );
-		$end_key   = self::matching_key( $flat, $end_field );
+		$ranges = array();
 
-		if ( null === $start_key || null === $end_key ) {
+		foreach ( self::date_field_pairs() as $pair ) {
+			list( $start_option, $end_option ) = $pair;
+
+			$start_field = self::configured_date_field( $start_option );
+			$end_field   = self::configured_date_field( $end_option );
+
+			if ( '' === $start_field || '' === $end_field ) {
+				continue;
+			}
+
+			$start_key = self::matching_key( $flat, $start_field );
+			$end_key   = self::matching_key( $flat, $end_field );
+
+			if ( null === $start_key || null === $end_key ) {
+				continue;
+			}
+
+			$range = self::range_between( $flat[ $start_key ], $flat[ $end_key ] );
+
+			unset( $flat[ $start_key ], $flat[ $end_key ] );
+
+			if ( null !== $range ) {
+				$ranges[] = $range;
+			}
+		}
+
+		if ( array() === $ranges ) {
 			return $flat;
 		}
 
-		$dates_key = self::matching_key( $flat, 'selected_dates' );
-
-		if ( null !== $dates_key && ! self::is_empty_value( $flat[ $dates_key ] ) ) {
-			return $flat;
-		}
-
-		$range = self::days_between( $flat[ $start_key ], $flat[ $end_key ] );
-
-		if ( array() === $range ) {
-			return $flat;
-		}
-
-		unset( $flat[ $start_key ], $flat[ $end_key ] );
-
-		$flat['selected_dates'] = $range;
+		$flat['date_ranges'] = $ranges;
 
 		return $flat;
+	}
+
+	/**
+	 * The configured start/end option pairs, ideal pair first.
+	 *
+	 * @return array<int,array{0:string,1:string}>
+	 */
+	protected static function date_field_pairs() {
+		return array_merge(
+			array( array( self::START_DATE_FIELD_OPTION, self::END_DATE_FIELD_OPTION ) ),
+			self::ALTERNATIVE_DATE_FIELD_OPTIONS
+		);
 	}
 
 	/**
@@ -734,54 +756,33 @@ class IntakeEndpoint {
 	}
 
 	/**
-	 * Every calendar day from a start value to an end value, inclusive.
+	 * One range from a submitted start value and end value.
 	 *
 	 * Uses the same accepted date formats the Validator itself parses, via
-	 * `Validator::parse_date()`, so a range sent in any format a single
-	 * candidate date may already arrive in is understood the same way. An end
-	 * date before the start date, either end failing to parse, or a range
-	 * longer than `self::MAX_RANGE_DAYS` all return no days rather than a
-	 * guess, which leaves the payload for the ordinary `too_few_dates`/
-	 * `unparseable_date` failures to report.
+	 * `Validator::parse_date()`, so a range sent in any format a date may arrive
+	 * in is understood the same way. A single day is a range whose bounds match,
+	 * which is what a visitor picking one date produces.
+	 *
+	 * An end before the start, or either bound failing to parse, returns null
+	 * rather than a guess about which of the two the sender meant.
 	 *
 	 * @param mixed $start Submitted start date value.
 	 * @param mixed $end   Submitted end date value.
-	 * @return string[] `Y-m-d` entries, oldest first. Empty when the pair does
-	 *                   not describe a usable range.
+	 * @return array{start:string,end:string}|null Null when the pair does not
+	 *                                             describe a usable range.
 	 */
-	protected static function days_between( $start, $end ) {
+	protected static function range_between( $start, $end ) {
 		$start_date = Validator::parse_date( $start );
 		$end_date   = Validator::parse_date( $end );
 
-		if ( null === $start_date || null === $end_date ) {
-			return array();
+		if ( null === $start_date || null === $end_date || $end_date < $start_date ) {
+			return null;
 		}
 
-		try {
-			$cursor = new \DateTimeImmutable( $start_date );
-			$last   = new \DateTimeImmutable( $end_date );
-		} catch ( \Exception $e ) {
-			return array();
-		}
-
-		if ( $cursor > $last ) {
-			return array();
-		}
-
-		$days = array();
-		$one  = new \DateInterval( 'P1D' );
-
-		while ( $cursor <= $last ) {
-			$days[] = $cursor->format( 'Y-m-d' );
-
-			if ( count( $days ) > self::MAX_RANGE_DAYS ) {
-				return array();
-			}
-
-			$cursor = $cursor->add( $one );
-		}
-
-		return $days;
+		return array(
+			'start' => $start_date,
+			'end'   => $end_date,
+		);
 	}
 
 	/**
@@ -935,12 +936,18 @@ class IntakeEndpoint {
 	/**
 	 * Flatten a decoded body to one level.
 	 *
-	 * Three shapes are recognised, which between them cover every sender seen:
+	 * Four shapes are recognised, which between them cover every sender seen:
 	 * a scalar under a key is that key's value; a node carrying both a label
 	 * key and a value key is that label's value, which is how a form plugin
 	 * delivering `{ label, value }` objects collapses to the same map as a
-	 * plain one; anything else is walked recursively, so a wrapper object such
-	 * as `fields` or `data` disappears rather than hiding the values inside it.
+	 * plain one; a candidate date range, or a list of them, is kept whole;
+	 * anything else is walked recursively, so a wrapper object such as `fields`
+	 * or `data` disappears rather than hiding the values inside it.
+	 *
+	 * The range shapes are recognised here rather than left to the recursion
+	 * because a range is the one field whose value is itself structured: walked
+	 * as a wrapper, a `date_ranges` list would come back as one unnamed entry
+	 * per range, and the field a sender populated directly would be lost.
 	 *
 	 * A key already present is not overwritten, so a top-level value always
 	 * beats one found deeper and the result does not depend on how deeply a
@@ -964,6 +971,18 @@ class IntakeEndpoint {
 
 			if ( null !== $pair ) {
 				self::put( $flat, '' === $pair[0] ? $key : $pair[0], $pair[1] );
+				continue;
+			}
+
+			// Before the value-list test, which would otherwise read a lone
+			// range's two bounds as two separate bare dates.
+			if ( self::is_range_node( $value ) ) {
+				self::put( $flat, $key, array( $value ) );
+				continue;
+			}
+
+			if ( self::is_range_list( $value ) ) {
+				self::put( $flat, $key, array_values( $value ) );
 				continue;
 			}
 
@@ -1042,6 +1061,63 @@ class IntakeEndpoint {
 	}
 
 	/**
+	 * Whether a node is one candidate date range: a `start`/`end` pair.
+	 *
+	 * Both keys are optional — a half-drawn range is still a range, and the
+	 * Validator is the one that says so — but no other key is allowed, so a
+	 * wrapper object that merely happens to carry a `start` is still walked.
+	 *
+	 * @param array $node Node to inspect.
+	 * @return bool
+	 */
+	protected static function is_range_node( array $node ) {
+		if ( ! array_key_exists( 'start', $node ) && ! array_key_exists( 'end', $node ) ) {
+			return false;
+		}
+
+		foreach ( $node as $key => $bound ) {
+			if ( 'start' !== $key && 'end' !== $key ) {
+				return false;
+			}
+
+			if ( ! is_scalar( $bound ) && null !== $bound ) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Whether a node is a list of candidate date ranges.
+	 *
+	 * At least one entry has to be a range object, because a list of nothing but
+	 * bare dates is an ordinary value list and is read as one. Bare dates
+	 * alongside range objects are allowed: a single day is a range whose bounds
+	 * match, and the store accepts it written either way.
+	 *
+	 * @param array $value Node to inspect.
+	 * @return bool
+	 */
+	protected static function is_range_list( array $value ) {
+		$ranges = 0;
+
+		foreach ( $value as $entry ) {
+			if ( is_scalar( $entry ) || null === $entry ) {
+				continue;
+			}
+
+			if ( ! is_array( $entry ) || ! self::is_range_node( $entry ) ) {
+				return false;
+			}
+
+			++$ranges;
+		}
+
+		return $ranges > 0;
+	}
+
+	/**
 	 * Whether an array is a plain list of scalars, as a multi-select delivers.
 	 *
 	 * @param array $value Array to inspect.
@@ -1062,7 +1138,7 @@ class IntakeEndpoint {
 	}
 
 	/**
-	 * Decode the three multi-value fields to lists.
+	 * Decode the two multi-value fields to lists.
 	 *
 	 * Applied to whichever submitted key supplies each field — the key
 	 * configured in `meh_field_map`, or the field name matched against a

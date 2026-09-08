@@ -9,7 +9,7 @@
  * - `$profile` selects the required-field set and nothing else. The Webhook
  *   Validation Profile requires all nine fields (Requirement 3.14); the Manual
  *   Validation Profile requires exactly `first_name`, `last_name`, `email` and
- *   `selected_dates` (Requirement 3.15).
+ *   `date_ranges` (Requirement 3.15).
  * - `$mode` decides only whether absence counts as a violation. On creation by
  *   either route (`MODE_FULL`) a required field that is absent fails. On an
  *   edit (`MODE_PARTIAL`) a required field that is absent is simply not being
@@ -81,7 +81,7 @@ class Validator {
 			'email',
 			'phone',
 			'total_guests',
-			'selected_dates',
+			'date_ranges',
 			'event_type',
 			'site_exclusivity',
 			'message',
@@ -92,7 +92,7 @@ class Validator {
 			'first_name',
 			'last_name',
 			'email',
-			'selected_dates',
+			'date_ranges',
 		),
 	);
 
@@ -139,10 +139,15 @@ class Validator {
 	const MAX_GUESTS = 10000;
 
 	/**
-	 * Inclusive candidate date count bounds (Requirement 3.5).
+	 * Inclusive candidate date range count bounds (Requirement 3.5).
+	 *
+	 * One is required — the ideal dates — and two more may be offered as
+	 * alternatives, which is what the enquiry form asks for and what the hub has
+	 * room to show. A sender offering a fourth is reporting a form the site does
+	 * not have, so it fails rather than being silently clipped to three.
 	 */
-	const MIN_DATES = 1;
-	const MAX_DATES = 10;
+	const MIN_RANGES = 1;
+	const MAX_RANGES = 3;
 
 	/**
 	 * Date formats accepted verbatim, tried in order.
@@ -177,14 +182,14 @@ class Validator {
 	 *                        A field is present only when its key is present.
 	 * @param string $profile self::PROFILE_WEBHOOK | self::PROFILE_MANUAL.
 	 * @param string $mode    self::MODE_FULL | self::MODE_PARTIAL.
-	 * @return array{ok:bool, values:array, dates:array, terms:array, errors:array<string,string>}
-	 *         On failure, `values`, `dates` and `terms` are empty and `errors`
+	 * @return array{ok:bool, values:array, ranges:array, terms:array, errors:array<string,string>}
+	 *         On failure, `values`, `ranges` and `terms` are empty and `errors`
 	 *         names every failing field. On success, `values` holds the
 	 *         sanitised scalar values of the fields the submission carried,
-	 *         `dates` the normalised `Y-m-d` candidate dates, and `terms` the
-	 *         accepted term sets keyed by taxonomy — each present only where the
-	 *         submission carried that field, so a caller can tell "not
-	 *         submitted" from "submitted empty".
+	 *         `ranges` the normalised candidate date ranges with the ideal one
+	 *         first, and `terms` the accepted term sets keyed by taxonomy — each
+	 *         present only where the submission carried that field, so a caller
+	 *         can tell "not submitted" from "submitted empty".
 	 */
 	public static function validate( array $fields, $profile = self::PROFILE_WEBHOOK, $mode = self::MODE_FULL ) {
 		$profile = self::PROFILE_MANUAL === $profile ? self::PROFILE_MANUAL : self::PROFILE_WEBHOOK;
@@ -205,7 +210,7 @@ class Validator {
 			return array(
 				'ok'     => false,
 				'values' => array(),
-				'dates'  => array(),
+				'ranges' => array(),
 				'terms'  => array(),
 				'errors' => $errors,
 			);
@@ -214,7 +219,7 @@ class Validator {
 		return array(
 			'ok'     => true,
 			'values' => self::accepted_values( $fields ),
-			'dates'  => self::accepted_dates( $fields ),
+			'ranges' => self::accepted_ranges( $fields ),
 			'terms'  => self::accepted_terms( $fields ),
 			'errors' => array(),
 		);
@@ -373,11 +378,11 @@ class Validator {
 			$errors['phone'] = 'no_digits';
 		}
 
-		if ( self::supplied( $fields, 'selected_dates' ) ) {
-			$code = self::date_error( $fields['selected_dates'] );
+		if ( self::supplied( $fields, 'date_ranges' ) ) {
+			$code = self::range_error( $fields['date_ranges'] );
 
 			if ( null !== $code ) {
-				$errors['selected_dates'] = $code;
+				$errors['date_ranges'] = $code;
 			}
 		}
 
@@ -422,30 +427,50 @@ class Validator {
 	}
 
 	/**
-	 * The candidate date failure code for a submitted value, or null when it passes.
+	 * The candidate date range failure code for a submitted value, or null when
+	 * it passes.
 	 *
-	 * The count rule is evaluated over the submitted entries rather than over
-	 * the distinct dates they resolve to, so a submission carrying more than ten
-	 * entries fails whether or not two of them name the same day.
+	 * The count rule is evaluated over the submitted entries rather than over the
+	 * distinct ranges they resolve to, so a submission carrying four entries fails
+	 * whether or not two of them name the same fortnight. That is the same
+	 * decision the day list made, and for the same reason: a form offering more
+	 * ranges than the site has is worth reporting rather than quietly accepting
+	 * three of them.
 	 *
-	 * @param mixed $value Submitted `selected_dates` value.
-	 * @return string|null 'too_few_dates' | 'too_many_dates' | 'unparseable_date' | null.
+	 * @param mixed $value Submitted `date_ranges` value.
+	 * @return string|null 'too_few_ranges' | 'too_many_ranges' | 'incomplete_range'
+	 *                     | 'unparseable_date' | 'ends_before_start' | null.
 	 */
-	protected static function date_error( $value ) {
-		$entries = self::to_list( $value );
+	protected static function range_error( $value ) {
+		$entries = self::to_ranges( $value );
 		$count   = count( $entries );
 
-		if ( $count < self::MIN_DATES ) {
-			return 'too_few_dates';
+		if ( $count < self::MIN_RANGES ) {
+			return 'too_few_ranges';
 		}
 
-		if ( $count > self::MAX_DATES ) {
-			return 'too_many_dates';
+		if ( $count > self::MAX_RANGES ) {
+			return 'too_many_ranges';
 		}
 
 		foreach ( $entries as $entry ) {
-			if ( null === self::parse_date( $entry ) ) {
+			// A bare date is the single-day range it names, so only an array can
+			// be missing a bound.
+			if ( is_array( $entry ) && ( ! array_key_exists( 'start', $entry ) || ! array_key_exists( 'end', $entry ) ) ) {
+				return 'incomplete_range';
+			}
+
+			$start = self::parse_date( is_array( $entry ) ? $entry['start'] : $entry );
+			$end   = self::parse_date( is_array( $entry ) ? $entry['end'] : $entry );
+
+			// An entry naming one bound and leaving the other blank reaches here
+			// rather than the check above, since the key is present.
+			if ( null === $start || null === $end ) {
 				return 'unparseable_date';
+			}
+
+			if ( $end < $start ) {
+				return 'ends_before_start';
 			}
 		}
 
@@ -523,32 +548,69 @@ class Validator {
 	}
 
 	/**
-	 * The accepted candidate dates, normalised to `Y-m-d` and de-duplicated.
+	 * The accepted candidate date ranges, normalised and de-duplicated.
 	 *
-	 * Candidate dates are a set in the store, so two entries naming the same day
-	 * yield one date. An empty result means the submission carried no
-	 * `selected_dates` at all: a submitted-but-empty set is a presence failure
-	 * under both profiles and never reaches here.
+	 * Both bounds come back as `Y-m-d` whatever form they arrived in, and two
+	 * entries naming the same range yield one — which is what the store holds. The
+	 * submitted order survives, because the first range is the ideal one.
+	 *
+	 * An empty result means the submission carried no `date_ranges` at all: a
+	 * submitted-but-empty list is a presence failure under both profiles and never
+	 * reaches here.
 	 *
 	 * @param array $fields Submitted field map.
-	 * @return string[]
+	 * @return array<int,array{start:string,end:string}>
 	 */
-	protected static function accepted_dates( array $fields ) {
-		if ( ! array_key_exists( 'selected_dates', $fields ) ) {
+	protected static function accepted_ranges( array $fields ) {
+		if ( ! array_key_exists( 'date_ranges', $fields ) ) {
 			return array();
 		}
 
-		$dates = array();
+		$ranges = array();
 
-		foreach ( self::to_list( $fields['selected_dates'] ) as $entry ) {
-			$date = self::parse_date( $entry );
+		foreach ( self::to_ranges( $fields['date_ranges'] ) as $entry ) {
+			if ( is_array( $entry ) ) {
+				$start = self::parse_date( isset( $entry['start'] ) ? $entry['start'] : null );
+				$end   = self::parse_date( isset( $entry['end'] ) ? $entry['end'] : null );
+			} else {
+				$start = self::parse_date( $entry );
+				$end   = $start;
+			}
 
-			if ( null !== $date && ! in_array( $date, $dates, true ) ) {
-				$dates[] = $date;
+			if ( null === $start || null === $end ) {
+				continue;
+			}
+
+			$range = array(
+				'start' => $start,
+				'end'   => $end,
+			);
+
+			if ( ! in_array( $range, $ranges, true ) ) {
+				$ranges[] = $range;
 			}
 		}
 
-		return $dates;
+		return $ranges;
+	}
+
+	/**
+	 * A submitted `date_ranges` value as a list of entries.
+	 *
+	 * `to_list()` cannot be used directly: a lone range is an array with `start`
+	 * and `end` keys, which that method would read as a list of two dates. So a
+	 * value carrying either of those keys is wrapped as the single entry it is,
+	 * and anything else is listed as usual.
+	 *
+	 * @param mixed $value Submitted value.
+	 * @return array<int,mixed>
+	 */
+	protected static function to_ranges( $value ) {
+		if ( is_array( $value ) && ( array_key_exists( 'start', $value ) || array_key_exists( 'end', $value ) ) ) {
+			return array( $value );
+		}
+
+		return self::to_list( $value );
 	}
 
 	/**

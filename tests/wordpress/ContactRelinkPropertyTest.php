@@ -179,7 +179,7 @@ class ContactRelinkPropertyTest extends WP_UnitTestCase {
 	const WORKFLOW_FIELDS = array(
 		'total_guests',
 		'message',
-		'selected_dates',
+		'date_ranges',
 		'event_type',
 		'site_exclusivity',
 	);
@@ -196,7 +196,7 @@ class ContactRelinkPropertyTest extends WP_UnitTestCase {
 		'phone',
 		'total_guests',
 		'message',
-		'selected_dates',
+		'date_ranges',
 		'event_type',
 		'site_exclusivity',
 	);
@@ -565,13 +565,21 @@ class ContactRelinkPropertyTest extends WP_UnitTestCase {
 			'The stored `total_guests` should be the corrected value. ' . $label
 		);
 
-		foreach ( array( 'selected_dates', 'event_type', 'site_exclusivity' ) as $field ) {
+		foreach ( array( 'event_type', 'site_exclusivity' ) as $field ) {
 			$this->assertSame(
 				self::sorted( (array) $expected[ $field ] ),
 				self::sorted( (array) $after[ $field ] ),
 				sprintf( 'The stored `%s` set should be the corrected one. %s', $field, $label )
 			);
 		}
+
+		// Compared as a list rather than as a set: the first range is the ideal
+		// one, so a correction that reordered them changed the answer.
+		$this->assertSame(
+			array_values( (array) $expected['date_ranges'] ),
+			$after['date_ranges'],
+			'The stored `date_ranges` list should be the corrected one, in the corrected order. ' . $label
+		);
 	}
 
 	/**
@@ -802,7 +810,8 @@ class ContactRelinkPropertyTest extends WP_UnitTestCase {
 	/**
 	 * Workflow values that may appear nowhere in FluentCRM.
 	 *
-	 * The six status names and every candidate date the enquiry ever holds.
+	 * The six status names and every bound of every candidate range the enquiry
+	 * ever holds.
 	 * Messages and term values are covered by the sentinel prefix instead, which
 	 * catches a fragment as readily as a whole value.
 	 *
@@ -812,8 +821,9 @@ class ContactRelinkPropertyTest extends WP_UnitTestCase {
 	private static function forbidden( array $case ) {
 		$values = Lifecycle::STATUSES;
 
-		foreach ( array_merge( $case['base']['selected_dates'], $case['edit']['selected_dates'] ) as $date ) {
-			$values[] = (string) $date;
+		foreach ( array_merge( $case['base']['date_ranges'], $case['edit']['date_ranges'] ) as $range ) {
+			$values[] = (string) $range['start'];
+			$values[] = (string) $range['end'];
 		}
 
 		return array_values( array_unique( $values ) );
@@ -1003,7 +1013,7 @@ class ContactRelinkPropertyTest extends WP_UnitTestCase {
 			'phone'            => '07700 ' . str_pad( (string) $pick( 999999 ), 6, '0', STR_PAD_LEFT ),
 			'total_guests'     => self::guests( $pick( 3 ), $pick( Generators::TOTAL_GUESTS_MAX ) ),
 			'message'          => self::SENTINEL . 'MESSAGE-A-' . $pick( 999 ) . ': a summer weekend, and a marquee.',
-			'selected_dates'   => self::dates( $pick, 1 ),
+			'date_ranges'      => self::ranges( $pick, 1 ),
 			'event_type'       => self::terms( 'EVENT-A', 1 + $pick( 3 ), $pick ),
 			'site_exclusivity' => self::terms( 'EXCLUSIVITY-A', 1 + $pick( 3 ), $pick ),
 		);
@@ -1033,7 +1043,7 @@ class ContactRelinkPropertyTest extends WP_UnitTestCase {
 			'phone'            => '+44 131 ' . str_pad( (string) $pick( 999999 ), 6, '0', STR_PAD_LEFT ),
 			'total_guests'     => self::guests( $pick( 3 ), $pick( Generators::TOTAL_GUESTS_MAX ) ),
 			'message'          => self::SENTINEL . 'MESSAGE-B-' . $pick( 999 ) . ': the date has moved, and so has the count.',
-			'selected_dates'   => self::dates( $pick, 300 ),
+			'date_ranges'      => self::ranges( $pick, 300 ),
 			'event_type'       => self::terms( 'EVENT-B', 1 + $pick( 3 ), $pick ),
 			'site_exclusivity' => self::terms( 'EXCLUSIVITY-B', 1 + $pick( 3 ), $pick ),
 		);
@@ -1120,18 +1130,26 @@ class ContactRelinkPropertyTest extends WP_UnitTestCase {
 	 * @param int      $start First day offset.
 	 * @return string[]
 	 */
-	private static function dates( callable $pick, $start ) {
-		$count  = 1 + $pick( 4 );
+	private static function ranges( callable $pick, $start ) {
+		$count  = 1 + $pick( Generators::RANGES_MAX );
 		$offset = (int) $start;
-		$dates  = array();
+		$ranges = array();
 
 		for ( $index = 0; $index < $count; $index++ ) {
-			// A strictly positive step keeps every date distinct.
+			// A strictly positive step, and the span added on afterwards, keep
+			// every range distinct and clear of the one before it.
 			$offset += 1 + $pick( 30 );
-			$dates[] = Generators::date_at( $offset );
+			$span    = $pick( 5 );
+
+			$ranges[] = array(
+				'start' => Generators::date_at( $offset ),
+				'end'   => Generators::date_at( $offset + $span ),
+			);
+
+			$offset += $span;
 		}
 
-		return $dates;
+		return $ranges;
 	}
 
 	/**

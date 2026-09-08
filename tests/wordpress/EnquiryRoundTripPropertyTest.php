@@ -3,13 +3,14 @@
  * Property 1: Enquiry storage round trip.
  *
  * Feature: enquiry-data-layer, Property 1: For any valid enquiry — including
- * values at the stated field capacities, unicode and quote characters, 1 to 10
- * candidate dates, and 0 to 20 values per multi-select field, each taxonomy
+ * values at the stated field capacities, unicode and quote characters, 1 to 3
+ * candidate date ranges, and 0 to 20 values per multi-select field, each taxonomy
  * drawn independently — writing it to the Enquiry Store and reading it back by
  * identifier returns every scalar field character-for-character equal to the
  * written value, the three timestamps equal to the written site-local times to
- * the nearest second, and the candidate dates, `event_type` values and
- * `site_exclusivity` values equal as sets irrespective of row order, an empty
+ * the nearest second, the candidate date ranges equal as a list in the written
+ * rank order, and the `event_type` and `site_exclusivity` values equal as sets
+ * irrespective of row order, an empty
  * multi-select reading back as an empty set rather than as an error or a null;
  * for any enquiry in which `phone`, `total_guests` or `message` is empty, in any
  * combination of the three, the read-back value of each empty field is the same
@@ -28,12 +29,18 @@
  *   return. So the test works against real tables at its own prefix, which it
  *   installs and drops itself.
  * - Row-order independence is exercised by writing each generated enquiry
- *   twice, the second time with its candidate dates and both term lists in the
- *   opposite order, and requiring the two hydrated reads to be identical apart
- *   from the identifier. The second write also supplies the three timestamps as
- *   Unix timestamps rather than as strings, so "equal to the nearest second in
- *   the site timezone" is asserted over two input forms of the same instant
- *   rather than over the formatting of one string.
+ *   twice, the second time with both term lists in the opposite order, and
+ *   requiring the two hydrated reads to be identical apart from the identifier.
+ *   The second write also supplies the three timestamps as Unix timestamps rather
+ *   than as strings, so "equal to the nearest second in the site timezone" is
+ *   asserted over two input forms of the same instant rather than over the
+ *   formatting of one string.
+ * - The candidate ranges are deliberately *not* mirrored with the term lists.
+ *   Their order is the rank the enquirer gave them — the ideal range first, then
+ *   the alternatives — so it is part of the value rather than an artefact of how
+ *   rows came back. A third write puts the same ranges in the opposite order and
+ *   requires the read to come back in that opposite order, which is what pins the
+ *   store to preserving rank rather than to normalising it away.
  * - The `total_guests` clause needs a companion row to mean anything: an
  *   unsupplied count reading back as null only matters if a supplied `0` reads
  *   back as `0`. Each iteration therefore writes a control enquiry holding `0`
@@ -200,36 +207,40 @@ class EnquiryRoundTripPropertyTest extends WP_UnitTestCase {
 				function ( array $case ) {
 					$case    = self::apply_optional_mode( $case );
 					$written = self::scalars( $case );
-					$dates   = $case['dates'];
+					$ranges  = $case['ranges'];
 					$terms   = self::terms( $case );
 
 					// Requirements 1.1, 1.2, 1.3: the enquiry, its candidate
-					// dates and both term lists, written as one enquiry.
-					$id = $this->write( $written, $dates, $terms );
+					// ranges and both term lists, written as one enquiry.
+					$id = $this->write( $written, $ranges, $terms );
 
 					$read = EnquiryStore::find( $id );
 
 					$this->assertIsArray( $read, 'A stored enquiry should be readable by identifier.' );
 					$this->assert_scalars( $written, $read );
-					$this->assert_sets( $dates, $terms, $read );
+					$this->assert_sets( $ranges, $terms, $read );
 
 					/*
-					 * The same enquiry again, its child rows written in the
+					 * The same enquiry again, its term rows written in the
 					 * opposite order and its timestamps supplied as Unix
 					 * timestamps rather than as strings. Both reads must be the
 					 * same enquiry (Requirement 1.6).
 					 */
 					$mirrored = $this->write(
 						self::as_timestamps( $written ),
-						array_reverse( $dates ),
+						$ranges,
 						array_map( 'array_reverse', $terms )
 					);
 
 					$this->assertSame(
 						self::comparable( $read ),
 						self::comparable( EnquiryStore::find( $mirrored ) ),
-						'Row order and timestamp input form should not change what reads back.'
+						'Term row order and timestamp input form should not change what reads back.'
 					);
+
+					// The ranges the other way about: rank is the value, so the
+					// read follows the write rather than settling on one order.
+					$this->assert_rank_is_preserved( $written, $ranges, $terms );
 
 					// Requirement 1.19: an unsupplied guest count is not a
 					// stored zero.
@@ -247,7 +258,7 @@ class EnquiryRoundTripPropertyTest extends WP_UnitTestCase {
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * One enquiry: every stored scalar, 1 to 10 candidate dates, and 0 to 20
+	 * One enquiry: every stored scalar, 1 to 3 candidate date ranges, and 0 to 20
 	 * values per multi-select field with each taxonomy drawn independently.
 	 *
 	 * @return \Eris\Generator
@@ -273,7 +284,7 @@ class EnquiryRoundTripPropertyTest extends WP_UnitTestCase {
 				'created_at'              => self::stamp(),
 				'updated_at'              => self::stamp(),
 				'status_changed_at'       => self::stamp(),
-				'dates'                   => Generators::candidate_dates( Generators::DATES_MIN, Generators::DATES_MAX ),
+				'ranges'                  => Generators::candidate_ranges( Generators::RANGES_MIN, Generators::RANGES_MAX ),
 				'event_type'              => Generators::term_set( 0, Generators::TERMS_MAX ),
 				'site_exclusivity'        => Generators::term_set( 0, Generators::TERMS_MAX ),
 			)
@@ -441,7 +452,7 @@ class EnquiryRoundTripPropertyTest extends WP_UnitTestCase {
 
 		unset( $comparable['id'] );
 
-		foreach ( array( 'selected_dates', 'event_type', 'site_exclusivity' ) as $key ) {
+		foreach ( array( 'event_type', 'site_exclusivity' ) as $key ) {
 			$values = isset( $comparable[ $key ] ) ? (array) $comparable[ $key ] : array();
 
 			sort( $values, SORT_STRING );
@@ -505,19 +516,20 @@ class EnquiryRoundTripPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The candidate dates and both term lists read back as the written sets,
-	 * an empty multi-select as an empty array (Requirements 1.2, 1.3, 1.6).
+	 * The candidate ranges read back as the written list and both term lists as
+	 * the written sets, an empty multi-select as an empty array
+	 * (Requirements 1.2, 1.3, 1.6).
 	 *
-	 * @param array $dates Candidate dates that were written.
-	 * @param array $terms Term lists that were written.
-	 * @param array $read  Hydrated enquiry.
+	 * @param array $ranges Candidate date ranges that were written.
+	 * @param array $terms  Term lists that were written.
+	 * @param array $read   Hydrated enquiry.
 	 * @return void
 	 */
-	private function assert_sets( array $dates, array $terms, array $read ) {
+	private function assert_sets( array $ranges, array $terms, array $read ) {
 		$this->assertSame(
-			self::set( $dates ),
-			self::set( $read['selected_dates'] ),
-			'The candidate dates should read back as the written set.'
+			array_values( $ranges ),
+			$read['date_ranges'],
+			'The candidate ranges should read back as the written list, in the written order.'
 		);
 
 		foreach ( $terms as $taxonomy => $values ) {
@@ -532,6 +544,35 @@ class EnquiryRoundTripPropertyTest extends WP_UnitTestCase {
 				sprintf( '`%s` should read back as the written set.', $taxonomy )
 			);
 		}
+	}
+
+	/**
+	 * The same ranges written the other way about read back the other way about
+	 * (Requirement 1.2).
+	 *
+	 * The companion to assert_sets(): that one shows the written order surviving,
+	 * this one shows it is the written order that survives rather than an order
+	 * the store happens to settle on. A single range makes no claim either way, so
+	 * it is skipped.
+	 *
+	 * @param array $scalars Scalar fields to write.
+	 * @param array $ranges  Candidate date ranges as first written.
+	 * @param array $terms   Term lists to write.
+	 * @return void
+	 */
+	private function assert_rank_is_preserved( array $scalars, array $ranges, array $terms ) {
+		if ( count( $ranges ) < 2 ) {
+			return;
+		}
+
+		$reversed = array_reverse( array_values( $ranges ) );
+		$read     = EnquiryStore::find( $this->write( $scalars, $reversed, $terms ) );
+
+		$this->assertSame(
+			$reversed,
+			$read['date_ranges'],
+			'Reversing the written ranges should reverse the ranges that read back.'
+		);
 	}
 
 	/**
@@ -590,12 +631,12 @@ class EnquiryRoundTripPropertyTest extends WP_UnitTestCase {
 	 * fresh.
 	 *
 	 * @param array $scalars Scalar column values.
-	 * @param array $dates   Candidate dates.
+	 * @param array $ranges  Candidate date ranges.
 	 * @param array $terms   Term lists keyed by taxonomy.
 	 * @return int Enquiry identifier.
 	 */
-	private function write( array $scalars, array $dates = array(), array $terms = array() ) {
-		$id = EnquiryStore::create( $scalars, $dates, $terms, array( 'email' => isset( $scalars['email'] ) ? $scalars['email'] : '' ) );
+	private function write( array $scalars, array $ranges = array(), array $terms = array() ) {
+		$id = EnquiryStore::create( $scalars, $ranges, $terms, array( 'email' => isset( $scalars['email'] ) ? $scalars['email'] : '' ) );
 
 		$this->assertNotWPError( $id, 'Storing a valid enquiry should succeed.' );
 

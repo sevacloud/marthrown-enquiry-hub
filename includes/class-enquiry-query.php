@@ -222,7 +222,7 @@ class EnquiryQuery {
 		$date_condition = self::candidate_dates( $args, $tables );
 
 		if ( '' !== $date_condition ) {
-			// Requirement 12.7: at least one candidate date inside the range.
+			// Requirement 12.7: at least one candidate range meeting the window.
 			$where[]    = $date_condition;
 			$bindings[] = $args['date_from'];
 			$bindings[] = $args['date_to'];
@@ -308,10 +308,17 @@ class EnquiryQuery {
 	/**
 	 * The candidate-date condition, or an empty string when it does not apply.
 	 *
-	 * An EXISTS subquery rather than a join: an enquiry holds up to ten
-	 * candidate dates, several of which can fall inside the range, and a join
-	 * would return that enquiry once per matching date — inflating the total,
+	 * An EXISTS subquery rather than a join: an enquiry holds up to three
+	 * candidate ranges, more than one of which can meet the window, and a join
+	 * would return that enquiry once per matching range — inflating the total,
 	 * the page contents and the per-status counts alike.
+	 *
+	 * The test is overlap, not containment: an enquiry whose candidate fortnight
+	 * begins before the window and ends inside it is an enquiry about days in the
+	 * window, and someone filtering to next month wants it. So a range matches
+	 * when it starts no later than the window ends and ends no earlier than the
+	 * window starts, which is the negation of "entirely before or entirely
+	 * after".
 	 *
 	 * Requirement 12.8 makes a lone bound apply no filter at all, so both
 	 * bounds have to be present for a condition to be produced.
@@ -333,10 +340,12 @@ class EnquiryQuery {
 
 		$dates = self::DATES_ALIAS;
 
+		// The end bound is compared first so the two placeholders take
+		// `date_from` then `date_to`, the order `build()` binds them in.
 		return 'EXISTS ( SELECT 1 FROM ' . $table . ' ' . $dates
 			. ' WHERE ' . $dates . '.enquiry_id = ' . self::ALIAS . '.id'
-			. ' AND ' . $dates . '.event_date >= %s'
-			. ' AND ' . $dates . '.event_date <= %s )';
+			. ' AND ' . $dates . '.end_date >= %s'
+			. ' AND ' . $dates . '.start_date <= %s )';
 	}
 
 	/**

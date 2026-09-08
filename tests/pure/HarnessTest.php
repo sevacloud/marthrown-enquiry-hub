@@ -26,20 +26,30 @@ class HarnessTest extends TestCase {
 		$this->forAll( Generators::enquiry() )
 			->then( function ( array $fields ) {
 				$this->assertCount( 9, $fields );
-				$this->assertGreaterThanOrEqual( 1, count( $fields['selected_dates'] ) );
-				$this->assertLessThanOrEqual( 10, count( $fields['selected_dates'] ) );
+				$this->assertGreaterThanOrEqual( 1, count( $fields['date_ranges'] ) );
+				$this->assertLessThanOrEqual( 3, count( $fields['date_ranges'] ) );
 				$this->assertGreaterThanOrEqual( 1, $fields['total_guests'] );
 				$this->assertLessThanOrEqual( 10000, $fields['total_guests'] );
 			} );
 	}
 
-	public function test_candidate_dates_respect_bounds_and_are_distinct() {
-		$this->forAll( Generators::candidate_dates( 1, 10 ) )
-			->then( function ( array $dates ) {
-				$this->assertSame( $dates, array_values( array_unique( $dates ) ) );
-				foreach ( $dates as $date ) {
-					$this->assertMatchesRegularExpression( '/^\d{4}-\d{2}-\d{2}$/', $date );
+	public function test_candidate_ranges_respect_bounds_and_are_distinct() {
+		$this->forAll( Generators::candidate_ranges( 1, 3 ) )
+			->then( function ( array $ranges ) {
+				$keys = array();
+
+				foreach ( $ranges as $range ) {
+					$this->assertMatchesRegularExpression( '/^\d{4}-\d{2}-\d{2}$/', $range['start'] );
+					$this->assertMatchesRegularExpression( '/^\d{4}-\d{2}-\d{2}$/', $range['end'] );
+					$this->assertLessThanOrEqual( $range['end'], $range['start'] );
+
+					$keys[] = $range['start'] . '/' . $range['end'];
 				}
+
+				// Distinct, because the Validator collapses duplicates: a
+				// generator emitting one twice would emit a shorter list than
+				// the count it chose.
+				$this->assertSame( $keys, array_values( array_unique( $keys ) ) );
 			} );
 	}
 

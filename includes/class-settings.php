@@ -344,24 +344,20 @@ class Settings {
 				'default'           => array(),
 			)
 		);
-		register_setting(
-			self::OPTION_GROUP,
-			self::OPT_INTAKE_START_DATE,
-			array(
-				'type'              => 'string',
-				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
-				'default'           => '',
-			)
-		);
-		register_setting(
-			self::OPTION_GROUP,
-			self::OPT_INTAKE_END_DATE,
-			array(
-				'type'              => 'string',
-				'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
-				'default'           => '',
-			)
-		);
+
+		foreach ( self::date_range_fields() as $pair ) {
+			foreach ( array( $pair['start_option'], $pair['end_option'] ) as $option ) {
+				register_setting(
+					self::OPTION_GROUP,
+					$option,
+					array(
+						'type'              => 'string',
+						'sanitize_callback' => array( __CLASS__, 'sanitize_text' ),
+						'default'           => '',
+					)
+				);
+			}
+		}
 
 		add_settings_section(
 			'meh_intake_section',
@@ -391,29 +387,31 @@ class Settings {
 			)
 		);
 
-		add_settings_field(
-			self::OPT_INTAKE_START_DATE,
-			__( 'Start date field', 'marthrown-enquiry-hub' ),
-			array( __CLASS__, 'render_text_field' ),
-			self::MENU_SLUG,
-			'meh_intake_section',
-			array(
-				'label_for'   => self::OPT_INTAKE_START_DATE,
-				'description' => __( 'Payload field holding a start date, where the form sends a date range instead of a candidate date list. Every day from here to the end date becomes a candidate date. Leave both this and the end date field blank to keep sending selected_dates as a list.', 'marthrown-enquiry-hub' ),
-			)
-		);
+		foreach ( self::date_range_fields() as $pair ) {
+			add_settings_field(
+				$pair['start_option'],
+				$pair['start_label'],
+				array( __CLASS__, 'render_text_field' ),
+				self::MENU_SLUG,
+				'meh_intake_section',
+				array(
+					'label_for'   => $pair['start_option'],
+					'description' => $pair['start_description'],
+				)
+			);
 
-		add_settings_field(
-			self::OPT_INTAKE_END_DATE,
-			__( 'End date field', 'marthrown-enquiry-hub' ),
-			array( __CLASS__, 'render_text_field' ),
-			self::MENU_SLUG,
-			'meh_intake_section',
-			array(
-				'label_for'   => self::OPT_INTAKE_END_DATE,
-				'description' => __( 'Payload field holding the end date of the range. Both this and the start date field must be set, and both must be present in a submission, for the range to expand.', 'marthrown-enquiry-hub' ),
-			)
-		);
+			add_settings_field(
+				$pair['end_option'],
+				$pair['end_label'],
+				array( __CLASS__, 'render_text_field' ),
+				self::MENU_SLUG,
+				'meh_intake_section',
+				array(
+					'label_for'   => $pair['end_option'],
+					'description' => $pair['end_description'],
+				)
+			);
+		}
 
 		foreach ( FieldMapper::FIELDS as $field ) {
 			add_settings_field(
@@ -432,6 +430,51 @@ class Settings {
 				)
 			);
 		}
+	}
+
+	/**
+	 * The three candidate-date-range controls: their options, labels and help.
+	 *
+	 * An enquirer names one set of ideal dates and may offer two alternatives, and
+	 * a webhook can only deliver a range as two fields, so the site names six
+	 * payload fields in all. They are described here rather than at each call site
+	 * so the registration, the rendering and the ordering cannot drift apart.
+	 *
+	 * The ideal pair is first and keeps the original option names, so a site
+	 * configured before alternatives existed has nothing to re-enter.
+	 *
+	 * @return array<int,array<string,string>>
+	 */
+	public static function date_range_fields() {
+		$pairs = array(
+			array(
+				'start_option'      => self::OPT_INTAKE_START_DATE,
+				'end_option'        => self::OPT_INTAKE_END_DATE,
+				'start_label'       => __( 'Ideal start date field', 'marthrown-enquiry-hub' ),
+				'end_label'         => __( 'Ideal end date field', 'marthrown-enquiry-hub' ),
+				'start_description' => __( 'Payload field holding the first day of the enquirer\'s ideal date range. Every enquiry needs one range, so a submission carrying neither this nor an explicit date_ranges value is rejected.', 'marthrown-enquiry-hub' ),
+				'end_description'   => __( 'Payload field holding the last day of the ideal range. Both fields must be named here and present in a submission for the range to be read; where the enquirer picked a single day, the form should send it as both.', 'marthrown-enquiry-hub' ),
+			),
+		);
+
+		$position = 2;
+
+		foreach ( IntakeEndpoint::ALTERNATIVE_DATE_FIELD_OPTIONS as $options ) {
+			$pairs[] = array(
+				'start_option'      => $options[0],
+				'end_option'        => $options[1],
+				/* translators: %d: which alternative range, 2 or 3. */
+				'start_label'       => sprintf( __( 'Alternative %d start date field', 'marthrown-enquiry-hub' ), $position ),
+				/* translators: %d: which alternative range, 2 or 3. */
+				'end_label'         => sprintf( __( 'Alternative %d end date field', 'marthrown-enquiry-hub' ), $position ),
+				'start_description' => __( 'Payload field holding the first day of an alternative range the enquirer would also accept. Optional: a submission leaving it blank simply carries one fewer range.', 'marthrown-enquiry-hub' ),
+				'end_description'   => __( 'Payload field holding the last day of that alternative range.', 'marthrown-enquiry-hub' ),
+			);
+
+			++$position;
+		}
+
+		return $pairs;
 	}
 
 	/**
@@ -548,7 +591,7 @@ class Settings {
 			'email'            => __( 'Email', 'marthrown-enquiry-hub' ),
 			'phone'            => __( 'Phone', 'marthrown-enquiry-hub' ),
 			'total_guests'     => __( 'Total guests', 'marthrown-enquiry-hub' ),
-			'selected_dates'   => __( 'Candidate dates', 'marthrown-enquiry-hub' ),
+			'date_ranges'      => __( 'Candidate date ranges', 'marthrown-enquiry-hub' ),
 			'event_type'       => __( 'Event type', 'marthrown-enquiry-hub' ),
 			'site_exclusivity' => __( 'Site exclusivity', 'marthrown-enquiry-hub' ),
 			'message'          => __( 'Message', 'marthrown-enquiry-hub' ),

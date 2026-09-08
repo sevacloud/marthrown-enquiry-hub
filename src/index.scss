@@ -785,11 +785,35 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 		}
 	}
 
+	/* One ranked candidate range: its own rule-off block inside the fieldset, so
+	   the three of them read as three choices rather than as six loose inputs. */
+	&__range {
+		display: flex;
+		flex-wrap: wrap;
+		align-items: flex-end;
+		gap: 12px;
+		padding: 8px 0;
+
+		& + & {
+			border-top: 1px solid #f0f0f1;
+		}
+	}
+
+	/* A `span`, not a nested `legend`: a fieldset takes one legend, and nesting a
+	   fieldset per range would draw three more boxes inside this one. */
+	&__range-legend {
+		flex-basis: 100%;
+		font-size: 11px;
+		font-weight: 600;
+		text-transform: uppercase;
+		color: #1d2327;
+	}
+
 	&__date {
 		display: flex;
 		align-items: flex-end;
 		gap: 8px;
-		margin: 0 0 8px;
+		margin: 0;
 	}
 
 	&__actions {
@@ -965,6 +989,21 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 		padding-left: 18px;
 		color: #50575e;
 		font-size: 12px;
+	}
+
+	/* The candidate ranges, one per line and unbulleted: the rank label in front
+	   of each is what orders them, so a bullet would say the same thing twice. */
+	&__ranges {
+		margin: 0;
+		padding: 0;
+		list-style: none;
+	}
+
+	&__range-rank {
+		color: #646970;
+		font-size: 11px;
+		font-weight: 600;
+		text-transform: uppercase;
 	}
 }
 

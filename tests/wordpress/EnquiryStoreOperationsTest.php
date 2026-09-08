@@ -107,7 +107,16 @@ class EnquiryStoreOperationsTest extends WP_UnitTestCase {
 				'source'       => 'webhook:enquiry-form',
 				'is_test'      => 1,
 			),
-			array( '2025-08-23', '2025-08-16' ),
+			array(
+				array(
+					'start' => '2025-08-16',
+					'end'   => '2025-08-18',
+				),
+				array(
+					'start' => '2025-08-23',
+					'end'   => '2025-08-23',
+				),
+			),
 			array(
 				'event_type'       => array( 'wedding', 'reception' ),
 				'site_exclusivity' => array( 'whole_site' ),
@@ -123,14 +132,27 @@ class EnquiryStoreOperationsTest extends WP_UnitTestCase {
 
 		$copy = EnquiryStore::find( $new_id );
 
-		// Requirement 9.4: the enquirer's details, the dates and both term sets.
+		// Requirement 9.4: the enquirer's details, the ranges and both term sets.
 		$this->assertSame( 'Ada', $copy['first_name'] );
 		$this->assertSame( 'Lovelace', $copy['last_name'] );
 		$this->assertSame( 'ada@example.com', $copy['email'] );
 		$this->assertSame( '07700 900123', $copy['phone'] );
 		$this->assertSame( 80, $copy['total_guests'] );
 		$this->assertSame( 'A summer weekend, ideally.', $copy['message'] );
-		$this->assertSame( array( '2025-08-16', '2025-08-23' ), $copy['selected_dates'] );
+		$this->assertSame(
+			array(
+				array(
+					'start' => '2025-08-16',
+					'end'   => '2025-08-18',
+				),
+				array(
+					'start' => '2025-08-23',
+					'end'   => '2025-08-23',
+				),
+			),
+			$copy['date_ranges'],
+			'The ranges are copied in the source order: the ideal one stays the ideal one.'
+		);
 		$this->assertSame( array( 'wedding', 'reception' ), $copy['event_type'] );
 		$this->assertSame( array( 'whole_site' ), $copy['site_exclusivity'] );
 
@@ -160,7 +182,20 @@ class EnquiryStoreOperationsTest extends WP_UnitTestCase {
 		// Requirement 9.9: the source is otherwise untouched.
 		$this->assertSame( 'closed', $source['status'] );
 		$this->assertSame( 41, $source['booking_id'] );
-		$this->assertSame( array( '2025-08-16', '2025-08-23' ), $source['selected_dates'] );
+		$this->assertSame(
+			array(
+				array(
+					'start' => '2025-08-16',
+					'end'   => '2025-08-18',
+				),
+				array(
+					'start' => '2025-08-23',
+					'end'   => '2025-08-23',
+				),
+			),
+			$source['date_ranges'],
+			'The ranges are copied in the source order: the ideal one stays the ideal one.'
+		);
 	}
 
 	/**
@@ -245,9 +280,9 @@ class EnquiryStoreOperationsTest extends WP_UnitTestCase {
 	 */
 	public function test_record_rejection_stores_the_payload_reason_and_detail() {
 		$payload = array(
-			'email'          => 'ada@example.com',
-			'selected_dates' => array( '2025-08-16' ),
-			'nested'         => array( 'deep' => array( 'value' => 1 ) ),
+			'email'       => 'ada@example.com',
+			'date_ranges' => array( array( 'start' => '2025-08-16', 'end' => '2025-08-17' ) ),
+			'nested'      => array( 'deep' => array( 'value' => 1 ) ),
 		);
 
 		$id = EnquiryStore::record_rejection(
@@ -644,11 +679,11 @@ class EnquiryStoreOperationsTest extends WP_UnitTestCase {
 	 * Write one enquiry through the store and return its identifier.
 	 *
 	 * @param array $fields Column overrides.
-	 * @param array $dates  Candidate dates.
+	 * @param array $ranges Candidate date ranges.
 	 * @param array $terms  Term lists keyed by taxonomy.
 	 * @return int
 	 */
-	private function seed_enquiry( array $fields = array(), array $dates = array(), array $terms = array() ) {
+	private function seed_enquiry( array $fields = array(), array $ranges = array(), array $terms = array() ) {
 		$defaults = array(
 			'first_name'        => 'Ada',
 			'last_name'         => 'Lovelace',
@@ -660,7 +695,7 @@ class EnquiryStoreOperationsTest extends WP_UnitTestCase {
 			'source'            => 'webhook:fixture',
 		);
 
-		$id = EnquiryStore::create( array_merge( $defaults, $fields ), $dates, $terms, array( 'seeded' => true ) );
+		$id = EnquiryStore::create( array_merge( $defaults, $fields ), $ranges, $terms, array( 'seeded' => true ) );
 
 		$this->assertIsInt( $id, 'Seeding an enquiry should succeed.' );
 

@@ -122,7 +122,7 @@ class IntakeHandlerTest extends WP_UnitTestCase {
 	/**
 	 * Requirements 2.1, 2.2, 2.3, 2.5, 2.6, 2.13, 5.1: a valid submission becomes
 	 * one enquiry at status `new`, stamped with the receipt time, carrying the
-	 * resolved source, its candidate dates, its terms and the verbatim payload,
+	 * resolved source, its candidate date ranges, its terms and the verbatim payload,
 	 * with one `created` history entry and no rejection row.
 	 *
 	 * @return void
@@ -155,7 +155,21 @@ class IntakeHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( 40, $enquiry['total_guests'] );
 		$this->assertSame( 'Looking at the barn for a September wedding.', $enquiry['message'] );
 
-		$this->assertSame( array( '2025-09-06', '2025-09-13' ), $enquiry['selected_dates'] );
+		// The ideal range as submitted, then the bare date as the single day it
+		// names: both shapes a submitted range takes, stored in rank order.
+		$this->assertSame(
+			array(
+				array(
+					'start' => '2025-09-06',
+					'end'   => '2025-09-07',
+				),
+				array(
+					'start' => '2025-09-13',
+					'end'   => '2025-09-13',
+				),
+			),
+			$enquiry['date_ranges']
+		);
 		$this->assertSame( array( 'wedding' ), $enquiry['event_type'] );
 		$this->assertSame( array( 'full site' ), $enquiry['site_exclusivity'] );
 
@@ -248,10 +262,10 @@ class IntakeHandlerTest extends WP_UnitTestCase {
 		$this->assertSame( 0, $outcome['enquiry_id'] );
 		$this->assertSame( IntakeHandler::REASON_VALIDATION, $outcome['reason'] );
 
-		// `Dates` resolves nothing: the label does not match `selected_dates`, so
+		// `Dates` resolves nothing: the label does not match `date_ranges`, so
 		// the field is absent rather than empty (Requirement 2.11).
 		$this->assertSame(
-			array( 'last_name', 'phone', 'total_guests', 'selected_dates', 'event_type', 'site_exclusivity', 'message' ),
+			array( 'last_name', 'phone', 'total_guests', 'date_ranges', 'event_type', 'site_exclusivity', 'message' ),
 			array_keys( $outcome['errors'] )
 		);
 
@@ -333,14 +347,20 @@ class IntakeHandlerTest extends WP_UnitTestCase {
 			'Email'            => 'ada@example.com',
 			'Phone'            => '0114 496 0000',
 			'Total Guests'     => '40',
-			'Selected Dates'   => array( '2025-09-06', '2025-09-13' ),
+			'Date Ranges'      => array(
+				array(
+					'start' => '2025-09-06',
+					'end'   => '2025-09-07',
+				),
+				'2025-09-13',
+			),
 			'Event Type'       => array( 'wedding' ),
 			'Site Exclusivity' => array( 'full site' ),
 			'Message'          => 'Looking at the barn for a September wedding.',
 		);
 
 		if ( isset( $overrides['Dates'] ) ) {
-			$overrides['Selected Dates'] = $overrides['Dates'];
+			$overrides['Date Ranges'] = $overrides['Dates'];
 			unset( $overrides['Dates'] );
 		}
 

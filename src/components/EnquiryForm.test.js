@@ -1,10 +1,11 @@
 /**
  * EnquiryForm component tests.
  *
- * Two things are asserted here that no server-side test can see: which fields
- * the create form marks required and which it marks optional, and that a 400's
+ * Three things are asserted here that no server-side test can see: which fields
+ * the create form marks required and which it marks optional, that a 400's
  * per-field `errors` map is rendered against the fields it names — all of them,
- * in one pass, rather than one failure per attempt.
+ * in one pass, rather than one failure per attempt — and the shape of the
+ * `date_ranges` list the form builds out of its three ranked range slots.
  *
  * The transport is mocked, not `../api`, so the client's `WP_Error` unwrapping
  * is part of what runs: the test supplies the envelope WordPress would send.
@@ -22,8 +23,7 @@ jest.mock( '@wordpress/api-fetch', () => ( {
 } ) );
 
 /**
- * The three text fields the form marks required, and the fourth it marks
- * required as the start date.
+ * The three text fields the form marks required, alongside the ideal start date.
  */
 const REQUIRED = [ 'First name', 'Last name', 'Email' ];
 
@@ -60,7 +60,21 @@ function helpFor( field ) {
 }
 
 /**
- * Fill in the four fields creation requires.
+ * One bound of one range slot, counting slots from zero.
+ *
+ * The three slots repeat the same two labels, so they are reached by position
+ * rather than by name: slot 0 is the ideal range.
+ *
+ * @param {number} slot  Range slot.
+ * @param {string} bound 'Start date' | 'End date'.
+ * @return {HTMLElement} The date input.
+ */
+function dateInput( slot, bound ) {
+	return screen.getAllByLabelText( bound )[ slot ];
+}
+
+/**
+ * Fill in the fields creation requires: the three names and the ideal start.
  *
  * @param {Object} values first_name, last_name, email, date.
  */
@@ -79,7 +93,7 @@ function fillRequired( {
 	fireEvent.change( screen.getByLabelText( 'Email' ), {
 		target: { value: email },
 	} );
-	fireEvent.change( screen.getByLabelText( 'Start date' ), {
+	fireEvent.change( dateInput( 0, 'Start date' ), {
 		target: { value: date },
 	} );
 }
@@ -89,15 +103,15 @@ beforeEach( () => {
 } );
 
 describe( 'EnquiryForm in create mode', () => {
-	it( 'marks the three required text fields and the start date required', () => {
+	it( 'marks the three required text fields and the ideal start date required', () => {
 		render( <EnquiryForm /> );
 
 		REQUIRED.forEach( ( label ) => {
 			expect( screen.getByLabelText( label ).required ).toBe( true );
 		} );
 
-		expect( screen.getByLabelText( 'Start date' ).required ).toBe( true );
-		expect( screen.getByLabelText( 'End date' ).required ).toBe( false );
+		expect( dateInput( 0, 'Start date' ).required ).toBe( true );
+		expect( dateInput( 0, 'End date' ).required ).toBe( false );
 	} );
 
 	it( 'marks the remaining five fields optional and says so', () => {
@@ -111,6 +125,58 @@ describe( 'EnquiryForm in create mode', () => {
 		} );
 	} );
 
+	it( 'offers three ranked range slots, only the first of them required', () => {
+		render( <EnquiryForm /> );
+
+		expect( screen.getAllByLabelText( 'Start date' ) ).toHaveLength( 3 );
+		expect( screen.getAllByLabelText( 'End date' ) ).toHaveLength( 3 );
+
+		expect(
+			screen
+				.getAllByLabelText( 'Start date' )
+				.map( ( field ) => field.required )
+		).toEqual( [ true, false, false ] );
+	} );
+
+	it( 'submits the ranges in rank order, dropping the slots left blank', async () => {
+		const sent = [];
+
+		apiFetch.mockImplementation(
+			respondWith( {
+				'POST enquiries': ( options ) => {
+					sent.push( options.data );
+
+					return { id: 7 };
+				},
+			} )
+		);
+
+		render( <EnquiryForm /> );
+
+		fillRequired( { date: '2026-06-01' } );
+		fireEvent.change( dateInput( 0, 'End date' ), {
+			target: { value: '2026-06-03' },
+		} );
+
+		// The middle slot is left blank and the last one filled, so the last one
+		// is submitted as the second range rather than the third.
+		fireEvent.change( dateInput( 2, 'Start date' ), {
+			target: { value: '2026-07-10' },
+		} );
+
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'Create enquiry' } )
+		);
+
+		await waitFor( () => expect( sent ).toHaveLength( 1 ) );
+
+		expect( sent[ 0 ].date_ranges ).toEqual( [
+			{ start: '2026-06-01', end: '2026-06-03' },
+			// An end date left blank is the start date again: one day.
+			{ start: '2026-07-10', end: '2026-07-10' },
+		] );
+	} );
+
 	it( 'renders every field a 400 names, against the field it names, in one pass', async () => {
 		apiFetch.mockImplementation(
 			respondWith( {
@@ -118,7 +184,7 @@ describe( 'EnquiryForm in create mode', () => {
 					throw validationFailure( {
 						email: 'invalid_email',
 						phone: 'no_digits',
-						selected_dates: 'too_few_dates',
+						date_ranges: 'too_few_ranges',
 					} );
 				},
 			} )
@@ -142,7 +208,7 @@ describe( 'EnquiryForm in create mode', () => {
 
 		expect( messages ).toEqual( [
 			'Enter a valid email address.',
-			'Choose at least one candidate date.',
+			'Give the ideal dates.',
 			'Enter a telephone number containing at least one digit.',
 		] );
 
@@ -156,11 +222,93 @@ describe( 'EnquiryForm in create mode', () => {
 			)
 		).toBe( true );
 
-		const dateError = screen.getByText(
-			'Choose at least one candidate date.'
-		);
+		const dateError = screen.getByText( 'Give the ideal dates.' );
 		expect( dateError.closest( 'fieldset' ) ).toBe(
-			screen.getByLabelText( 'Start date' ).closest( 'fieldset' )
+			dateInput( 0, 'Start date' ).closest( 'fieldset' )
 		);
+	} );
+} );
+
+describe( 'EnquiryForm in edit mode', () => {
+	it( 'opens on the stored ranges in their stored order', () => {
+		render(
+			<EnquiryForm
+				enquiry={ {
+					id: 12,
+					first_name: 'Grace',
+					last_name: 'Hopper',
+					email: 'grace@example.com',
+					date_ranges: [
+						{ start: '2026-06-01', end: '2026-06-03' },
+						{ start: '2026-05-09', end: '2026-05-09' },
+					],
+				} }
+			/>
+		);
+
+		// Chronology does not reorder them: the first stored range is the ideal
+		// one whether or not it falls first in the year.
+		expect(
+			screen
+				.getAllByLabelText( 'Start date' )
+				.map( ( field ) => field.value )
+		).toEqual( [ '2026-06-01', '2026-05-09', '' ] );
+
+		expect(
+			screen.getAllByLabelText( 'End date' ).map( ( field ) => field.value )
+		).toEqual( [ '2026-06-03', '2026-05-09', '' ] );
+	} );
+
+	it( 'submits the ranges when their order changes but their days do not', async () => {
+		const sent = [];
+
+		apiFetch.mockImplementation(
+			respondWith( {
+				'PATCH enquiries/12': ( options ) => {
+					sent.push( options.data );
+
+					return { id: 12, changed: {} };
+				},
+			} )
+		);
+
+		render(
+			<EnquiryForm
+				enquiry={ {
+					id: 12,
+					first_name: 'Grace',
+					last_name: 'Hopper',
+					email: 'grace@example.com',
+					date_ranges: [
+						{ start: '2026-06-01', end: '2026-06-01' },
+						{ start: '2026-07-10', end: '2026-07-10' },
+					],
+				} }
+			/>
+		);
+
+		// Swap the two: the same two days, the other way round.
+		fireEvent.change( dateInput( 0, 'Start date' ), {
+			target: { value: '2026-07-10' },
+		} );
+		fireEvent.change( dateInput( 0, 'End date' ), {
+			target: { value: '2026-07-10' },
+		} );
+		fireEvent.change( dateInput( 1, 'Start date' ), {
+			target: { value: '2026-06-01' },
+		} );
+		fireEvent.change( dateInput( 1, 'End date' ), {
+			target: { value: '2026-06-01' },
+		} );
+
+		fireEvent.click( screen.getByRole( 'button', { name: 'Save changes' } ) );
+
+		await waitFor( () => expect( sent ).toHaveLength( 1 ) );
+
+		expect( Object.keys( sent[ 0 ] ) ).toEqual( [ 'date_ranges' ] );
+		expect( sent[ 0 ].date_ranges ).toEqual( [
+			{ start: '2026-07-10', end: '2026-07-10' },
+			{ start: '2026-06-01', end: '2026-06-01' },
+		] );
 	} );
 } );

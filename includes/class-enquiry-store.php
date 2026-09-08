@@ -23,9 +23,10 @@
  *   which prepare internally. No submitted value is concatenated into SQL
  *   (Requirement 3.10).
  * - **What was written is what reads back.** `find()` returns the hydrated
- *   shape in the design: scalars as written, `selected_dates`, `event_type` and
- *   `site_exclusivity` as arrays, an unsupplied `total_guests` as `null` and an
- *   unsupplied `phone` or `message` as `''`, and `payload` decoded
+ *   shape in the design: scalars as written, `event_type` and
+ *   `site_exclusivity` as arrays, `date_ranges` as a list of `start`/`end`
+ *   pairs with the ideal range first, an unsupplied `total_guests` as `null` and
+ *   an unsupplied `phone` or `message` as `''`, and `payload` decoded
  *   (Requirements 1.6, 1.8, 1.19).
  *
  * @package MarthrownEnquiryHub
@@ -280,31 +281,34 @@ class EnquiryStore {
 	protected static $transactional = null;
 
 	/**
-	 * Store one enquiry, its candidate dates, its terms and its payload.
+	 * Store one enquiry, its candidate date ranges, its terms and its payload.
 	 *
 	 * All-or-nothing: a failure anywhere leaves no enquiry row, no candidate
 	 * date row and no term row behind, and returns a `WP_Error` so the caller
 	 * can report that storage did not complete (Requirement 3.13).
 	 *
-	 * Candidate dates and term sets are stored as sets: duplicate entries
-	 * collapse to one row, because two identical candidate dates are one
-	 * candidate date (Requirement 1.6 compares them as sets).
+	 * Term sets are stored as sets: duplicate entries collapse to one row,
+	 * because two identical terms are one term (Requirement 1.6 compares them as
+	 * sets). Candidate date ranges collapse the same way, but keep the order they
+	 * arrived in rather than being sorted: the first range is the enquirer's ideal
+	 * one and the rest are alternatives, so their order is part of what they mean.
 	 *
 	 * @param array $enquiry Scalar column values; unknown keys are ignored.
-	 * @param array $dates   Candidate dates, each parseable as a calendar date.
+	 * @param array $ranges  Candidate date ranges, each `array{start,end}` or a
+	 *                       bare date standing for a single-day range.
 	 * @param array $terms   Term lists keyed by taxonomy: `event_type`, `site_exclusivity`.
 	 * @param array $payload Enquiry Payload Snapshot, stored as JSON.
 	 * @return int|\WP_Error The new enquiry identifier, or a failure.
 	 */
-	public static function create( array $enquiry, array $dates = array(), array $terms = array(), array $payload = array() ) {
+	public static function create( array $enquiry, array $ranges = array(), array $terms = array(), array $payload = array() ) {
 		global $wpdb;
 
 		// Pre-flight before anything is written, so an unusable candidate date
 		// fails without leaving a parent row to clean up.
-		$dates = self::normalise_dates( $dates );
+		$ranges = self::normalise_ranges( $ranges );
 
-		if ( is_wp_error( $dates ) ) {
-			return $dates;
+		if ( is_wp_error( $ranges ) ) {
+			return $ranges;
 		}
 
 		$terms = self::normalise_terms( $terms );
@@ -321,7 +325,7 @@ class EnquiryStore {
 			return self::abandon( $started, 0, 'enquiry row', $wpdb->last_error, $payload );
 		}
 
-		if ( $dates && ! self::insert_dates( $id, $dates ) ) {
+		if ( $ranges && ! self::insert_ranges( $id, $ranges ) ) {
 			return self::abandon( $started, $id, 'candidate dates', $wpdb->last_error, $payload );
 		}
 
@@ -420,7 +424,8 @@ class EnquiryStore {
 	 *   it was (Requirements 19.4, 19.5).
 	 * - **Reports what actually changed.** The return value is a `changed` map,
 	 *   `field => [ from, to ]`, comparing each submitted value against the
-	 *   stored one, with the candidate dates and each term list compared as sets.
+	 *   stored one, with each term list compared as a set and the candidate date
+	 *   ranges compared in order.
 	 *   Three separate decisions key off it — whether to touch `updated_at`
 	 *   (Requirement 19.8), what the `fields_edited` history entry holds
 	 *   (Requirement 19.13), and whether the contact needs re-linking
@@ -441,12 +446,12 @@ class EnquiryStore {
 	 *
 	 * @param int        $id     Enquiry identifier.
 	 * @param array      $fields Subset of self::EDITABLE_COLUMNS; other keys are ignored.
-	 * @param array|null $dates  Replacement candidate-date set, or null to leave it alone.
+	 * @param array|null $ranges Replacement candidate date ranges, or null to leave them alone.
 	 * @param array|null $terms  Replacement term sets keyed by taxonomy; a null
 	 *                           value, or an absent taxonomy, leaves that set alone.
 	 * @return array{changed:array<string,array{from:mixed,to:mixed}>}|\WP_Error
 	 */
-	public static function update( $id, array $fields, ?array $dates = null, ?array $terms = null ) {
+	public static function update( $id, array $fields, ?array $ranges = null, ?array $terms = null ) {
 		global $wpdb;
 
 		$id = (int) $id;
@@ -487,23 +492,26 @@ class EnquiryStore {
 			);
 		}
 
-		$stored_dates = isset( $stored['selected_dates'] ) ? array_values( (array) $stored['selected_dates'] ) : array();
-		$new_dates    = null;
+		$stored_ranges = isset( $stored['date_ranges'] ) ? array_values( (array) $stored['date_ranges'] ) : array();
+		$new_ranges    = null;
 
-		if ( null !== $dates ) {
+		if ( null !== $ranges ) {
 			// Pre-flight before anything is written, so an unusable candidate date
 			// fails with every stored value still in place (Requirement 19.5).
-			$normalised = self::normalise_dates( $dates );
+			$normalised = self::normalise_ranges( $ranges );
 
 			if ( is_wp_error( $normalised ) ) {
 				return $normalised;
 			}
 
-			if ( ! self::same_set( $stored_dates, $normalised ) ) {
-				$new_dates = $normalised;
+			// Compared in order, not as a set: promoting the second range to the
+			// ideal one changes nothing about which days were named and everything
+			// about which of them the enquirer would rather have.
+			if ( $stored_ranges !== $normalised ) {
+				$new_ranges = $normalised;
 
-				$changed['selected_dates'] = array(
-					'from' => $stored_dates,
+				$changed['date_ranges'] = array(
+					'from' => $stored_ranges,
 					'to'   => $normalised,
 				);
 			}
@@ -554,7 +562,7 @@ class EnquiryStore {
 			}
 		}
 
-		if ( null !== $new_dates && ! self::replace_dates( $id, $new_dates ) ) {
+		if ( null !== $new_ranges && ! self::replace_ranges( $id, $new_ranges ) ) {
 			return self::abandon_update( $started, $id, 'candidate dates', $wpdb->last_error, $stored, $changed );
 		}
 
@@ -640,7 +648,7 @@ class EnquiryStore {
 			'duplicated_at'      => $now,
 		);
 
-		$new_id = self::create( $enquiry, isset( $source['selected_dates'] ) ? (array) $source['selected_dates'] : array(), $terms, $payload );
+		$new_id = self::create( $enquiry, isset( $source['date_ranges'] ) ? (array) $source['date_ranges'] : array(), $terms, $payload );
 
 		if ( is_wp_error( $new_id ) ) {
 			// `create()` has already rolled back and deleted whatever it wrote.
@@ -835,7 +843,7 @@ class EnquiryStore {
 			return null;
 		}
 
-		return self::hydrate( $row, self::dates_for( $id ), self::terms_for( $id ) );
+		return self::hydrate( $row, self::ranges_for( $id ), self::terms_for( $id ) );
 	}
 
 	/**
@@ -852,12 +860,12 @@ class EnquiryStore {
 	 * as though it were would put an impossible date in the API. That is what
 	 * lets the read layer detect an incomplete stored row and fail loudly.
 	 *
-	 * @param array $row   Raw enquiry row, keyed by column name.
-	 * @param array $dates Candidate dates as `Y-m-d` strings.
-	 * @param array $terms Term lists keyed by taxonomy.
+	 * @param array $row    Raw enquiry row, keyed by column name.
+	 * @param array $ranges Candidate date ranges, ideal first.
+	 * @param array $terms  Term lists keyed by taxonomy.
 	 * @return array
 	 */
-	public static function hydrate( array $row, array $dates = array(), array $terms = array() ) {
+	public static function hydrate( array $row, array $ranges = array(), array $terms = array() ) {
 		$hydrated = array(
 			'id'                      => isset( $row['id'] ) ? (int) $row['id'] : 0,
 			'first_name'              => self::text( $row, 'first_name' ),
@@ -877,7 +885,7 @@ class EnquiryStore {
 			'is_test'                 => isset( $row['is_test'] ) ? (bool) (int) $row['is_test'] : false,
 			'duplicated_from_id'      => self::number( $row, 'duplicated_from_id' ),
 			'duplicated_to_id'        => self::number( $row, 'duplicated_to_id' ),
-			'selected_dates'          => array_values( $dates ),
+			'date_ranges'             => array_values( $ranges ),
 		);
 
 		// An empty multi-select reads back as an empty array rather than as a
@@ -892,24 +900,42 @@ class EnquiryStore {
 	}
 
 	/**
-	 * Candidate dates of one enquiry, ordered by date.
+	 * Candidate date ranges of one enquiry, ideal range first.
+	 *
+	 * Ordered by `position` rather than by date, because position 0 is the range
+	 * the enquirer would rather have and the alternatives that follow are ranked,
+	 * not chronological — an enquirer may well prefer a later week.
 	 *
 	 * @param int $id Enquiry identifier.
-	 * @return string[] `Y-m-d` strings.
+	 * @return array<int,array{start:string,end:string}>
 	 */
-	public static function dates_for( $id ) {
+	public static function ranges_for( $id ) {
 		global $wpdb;
 
 		$table = Schema::table( 'dates' );
 
-		$rows = $wpdb->get_col(
+		$rows = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT event_date FROM {$table} WHERE enquiry_id = %d ORDER BY event_date ASC, id ASC", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+				"SELECT start_date, end_date FROM {$table} WHERE enquiry_id = %d ORDER BY position ASC, id ASC", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
 				(int) $id
-			)
+			),
+			ARRAY_A
 		);
 
-		return is_array( $rows ) ? array_map( 'strval', $rows ) : array();
+		return is_array( $rows ) ? array_map( array( __CLASS__, 'range_of' ), $rows ) : array();
+	}
+
+	/**
+	 * One stored row as a range.
+	 *
+	 * @param array $row Row carrying `start_date` and `end_date`.
+	 * @return array{start:string,end:string}
+	 */
+	protected static function range_of( array $row ) {
+		return array(
+			'start' => isset( $row['start_date'] ) ? (string) $row['start_date'] : '',
+			'end'   => isset( $row['end_date'] ) ? (string) $row['end_date'] : '',
+		);
 	}
 
 	/**
@@ -995,16 +1021,16 @@ class EnquiryStore {
 			$ids[] = isset( $row['id'] ) ? (int) $row['id'] : 0;
 		}
 
-		$dates = self::dates_for_many( $ids );
-		$terms = self::terms_for_many( $ids );
-		$items = array();
+		$ranges = self::ranges_for_many( $ids );
+		$terms  = self::terms_for_many( $ids );
+		$items  = array();
 
 		foreach ( $rows as $row ) {
 			$id = isset( $row['id'] ) ? (int) $row['id'] : 0;
 
 			$items[] = self::hydrate(
 				$row,
-				isset( $dates[ $id ] ) ? $dates[ $id ] : array(),
+				isset( $ranges[ $id ] ) ? $ranges[ $id ] : array(),
 				isset( $terms[ $id ] ) ? $terms[ $id ] : array()
 			);
 		}
@@ -1409,37 +1435,102 @@ class EnquiryStore {
 	}
 
 	/**
-	 * Reduce submitted candidate dates to an ordered set of `Y-m-d` strings.
+	 * Reduce submitted candidate date ranges to a set, in the order given.
+	 *
+	 * An entry may be `array{start,end}` or a bare date, which stands for the
+	 * single-day range starting and ending on it — the shape a one-night booking
+	 * takes, and the shape every row had before ranges existed.
+	 *
+	 * A lone range object handed in where a list was expected is read as the one
+	 * range it is, rather than as two bare dates one per bound: a caller with a
+	 * single range to store writes it the obvious way often enough that guessing
+	 * wrong there would corrupt the record silently.
 	 *
 	 * An unparseable entry is a failure rather than a skipped row: silently
-	 * dropping a candidate date would store an enquiry the enquirer did not
-	 * make, and the zero date the column would otherwise take is not a date.
+	 * dropping a candidate range would store an enquiry the enquirer did not
+	 * make, and the zero date the column would otherwise take is not a date. A
+	 * range ending before it starts is the same kind of failure — it is not a
+	 * range, and quietly swapping the bounds would guess at which of the two the
+	 * enquirer got wrong.
 	 *
-	 * @param array $dates Submitted candidate dates.
-	 * @return array|\WP_Error
+	 * Duplicates collapse, because naming the same fortnight twice names it once.
+	 * The order survives: the first range is the ideal one.
+	 *
+	 * @param array $ranges Submitted candidate date ranges.
+	 * @return array<int,array{start:string,end:string}>|\WP_Error
 	 */
-	protected static function normalise_dates( array $dates ) {
+	protected static function normalise_ranges( array $ranges ) {
+		if ( array_key_exists( 'start', $ranges ) || array_key_exists( 'end', $ranges ) ) {
+			$ranges = array( $ranges );
+		}
+
 		$normalised = array();
 
-		foreach ( $dates as $entry ) {
-			$date = self::to_date( $entry );
+		foreach ( $ranges as $entry ) {
+			$range = self::to_range( $entry );
 
-			if ( null === $date ) {
+			if ( is_wp_error( $range ) ) {
+				return $range;
+			}
+
+			if ( ! in_array( $range, $normalised, true ) ) {
+				$normalised[] = $range;
+			}
+		}
+
+		return $normalised;
+	}
+
+	/**
+	 * Read one submitted entry as a range.
+	 *
+	 * @param mixed $entry `array{start,end}`, or a date standing for a single day.
+	 * @return array{start:string,end:string}|\WP_Error
+	 */
+	protected static function to_range( $entry ) {
+		if ( is_array( $entry ) ) {
+			$start = self::to_date( isset( $entry['start'] ) ? $entry['start'] : null );
+			$end   = self::to_date( isset( $entry['end'] ) ? $entry['end'] : null );
+
+			// An entry carrying only one bound is a half-drawn range, and which
+			// half is missing decides nothing: the other bound is unknown, so
+			// there is no range to store.
+			if ( null === $start || null === $end ) {
 				return self::error(
 					'meh_store_invalid_date',
-					'A candidate date could not be read as a calendar date.',
+					'A candidate date range needs both a start and an end.',
 					400
 				);
 			}
 
-			if ( ! in_array( $date, $normalised, true ) ) {
-				$normalised[] = $date;
+			if ( $end < $start ) {
+				return self::error(
+					'meh_store_invalid_range',
+					'A candidate date range cannot end before it starts.',
+					400
+				);
 			}
+
+			return array(
+				'start' => $start,
+				'end'   => $end,
+			);
 		}
 
-		sort( $normalised );
+		$date = self::to_date( $entry );
 
-		return $normalised;
+		if ( null === $date ) {
+			return self::error(
+				'meh_store_invalid_date',
+				'A candidate date could not be read as a calendar date.',
+				400
+			);
+		}
+
+		return array(
+			'start' => $date,
+			'end'   => $date,
+		);
 	}
 
 	/**
@@ -1482,23 +1573,32 @@ class EnquiryStore {
 	}
 
 	/**
-	 * Insert every candidate date row of one enquiry in one statement.
+	 * Insert every candidate date range of one enquiry in one statement.
 	 *
-	 * @param int      $id    Enquiry identifier.
-	 * @param string[] $dates `Y-m-d` strings.
+	 * The position each range is written at is its index in the list, so what
+	 * comes back out is what went in: the ideal range at 0, the alternatives
+	 * after it.
+	 *
+	 * @param int   $id     Enquiry identifier.
+	 * @param array $ranges Ranges, already a normalised list.
 	 * @return bool
 	 */
-	protected static function insert_dates( $id, array $dates ) {
+	protected static function insert_ranges( $id, array $ranges ) {
 		$table    = Schema::table( 'dates' );
-		$rows     = array_fill( 0, count( $dates ), '( %d, %s )' );
+		$rows     = array_fill( 0, count( $ranges ), '( %d, %s, %s, %d )' );
 		$bindings = array();
+		$position = 0;
 
-		foreach ( $dates as $date ) {
+		foreach ( $ranges as $range ) {
 			$bindings[] = (int) $id;
-			$bindings[] = $date;
+			$bindings[] = $range['start'];
+			$bindings[] = $range['end'];
+			$bindings[] = $position;
+
+			++$position;
 		}
 
-		$sql = "INSERT INTO {$table} ( enquiry_id, event_date ) VALUES " . implode( ', ', $rows );
+		$sql = "INSERT INTO {$table} ( enquiry_id, start_date, end_date, position ) VALUES " . implode( ', ', $rows );
 
 		return self::write( $sql, $bindings );
 	}
@@ -1528,27 +1628,28 @@ class EnquiryStore {
 	}
 
 	/**
-	 * Replace the whole candidate-date set of one enquiry.
+	 * Replace the whole candidate date range list of one enquiry.
 	 *
-	 * Delete then insert rather than diff: a candidate date has no identity
-	 * beyond the day it names, so there is no row to update.
+	 * Delete then insert rather than diff: a range has no identity beyond the
+	 * days it spans and the place it holds in the list, so there is no row to
+	 * update.
 	 *
-	 * @param int      $id    Enquiry identifier.
-	 * @param string[] $dates `Y-m-d` strings, already a normalised set.
+	 * @param int   $id     Enquiry identifier.
+	 * @param array $ranges Ranges, already a normalised list.
 	 * @return bool
 	 */
-	protected static function replace_dates( $id, array $dates ) {
+	protected static function replace_ranges( $id, array $ranges ) {
 		$table = Schema::table( 'dates' );
 
 		if ( ! self::write( "DELETE FROM {$table} WHERE enquiry_id = %d", array( (int) $id ) ) ) {
 			return false;
 		}
 
-		if ( ! $dates ) {
+		if ( ! $ranges ) {
 			return true;
 		}
 
-		return self::insert_dates( $id, $dates );
+		return self::insert_ranges( $id, $ranges );
 	}
 
 	/**
@@ -1670,8 +1771,8 @@ class EnquiryStore {
 			$wpdb->update( Schema::table( 'enquiries' ), $data, array( 'id' => (int) $id ), $formats, array( '%d' ) );
 		}
 
-		if ( isset( $changed['selected_dates'] ) ) {
-			self::replace_dates( $id, isset( $stored['selected_dates'] ) ? (array) $stored['selected_dates'] : array() );
+		if ( isset( $changed['date_ranges'] ) ) {
+			self::replace_ranges( $id, isset( $stored['date_ranges'] ) ? (array) $stored['date_ranges'] : array() );
 		}
 
 		foreach ( self::TAXONOMIES as $taxonomy ) {
@@ -1750,14 +1851,15 @@ class EnquiryStore {
 	}
 
 	/**
-	 * Candidate dates of several enquiries, keyed by enquiry identifier.
+	 * Candidate date ranges of several enquiries, keyed by enquiry identifier.
 	 *
-	 * One statement for a whole page rather than one per row.
+	 * One statement for a whole page rather than one per row. Each list comes
+	 * back in position order, as `ranges_for()` returns one.
 	 *
 	 * @param int[] $ids Enquiry identifiers.
-	 * @return array<int,string[]>
+	 * @return array<int,array<int,array{start:string,end:string}>>
 	 */
-	protected static function dates_for_many( array $ids ) {
+	protected static function ranges_for_many( array $ids ) {
 		global $wpdb;
 
 		$ids = self::identifiers( $ids );
@@ -1769,27 +1871,27 @@ class EnquiryStore {
 		$table        = Schema::table( 'dates' );
 		$placeholders = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
 
-		$sql = "SELECT enquiry_id, event_date FROM {$table} WHERE enquiry_id IN ( {$placeholders} )"
-			. ' ORDER BY event_date ASC, id ASC';
+		$sql = "SELECT enquiry_id, start_date, end_date FROM {$table} WHERE enquiry_id IN ( {$placeholders} )"
+			. ' ORDER BY position ASC, id ASC';
 
-		$rows  = $wpdb->get_results( $wpdb->prepare( $sql, $ids ), ARRAY_A ); // phpcs:ignore WordPress.DB
-		$dates = array();
+		$rows   = $wpdb->get_results( $wpdb->prepare( $sql, $ids ), ARRAY_A ); // phpcs:ignore WordPress.DB
+		$ranges = array();
 
 		if ( ! is_array( $rows ) ) {
-			return $dates;
+			return $ranges;
 		}
 
 		foreach ( $rows as $row ) {
 			$id = isset( $row['enquiry_id'] ) ? (int) $row['enquiry_id'] : 0;
 
-			if ( ! isset( $dates[ $id ] ) ) {
-				$dates[ $id ] = array();
+			if ( ! isset( $ranges[ $id ] ) ) {
+				$ranges[ $id ] = array();
 			}
 
-			$dates[ $id ][] = isset( $row['event_date'] ) ? (string) $row['event_date'] : '';
+			$ranges[ $id ][] = self::range_of( $row );
 		}
 
-		return $dates;
+		return $ranges;
 	}
 
 	/**

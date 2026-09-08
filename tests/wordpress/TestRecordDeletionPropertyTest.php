@@ -5,7 +5,7 @@
  * Feature: enquiry-data-layer, Property 38: For any population of enquiries
  * mixing test and live records, the delete-test-records route removes every
  * enquiry whose `is_test` value is true along with that enquiry's candidate
- * dates, terms, notes and history, and leaves every enquiry whose `is_test`
+ * date ranges, terms, notes and history, and leaves every enquiry whose `is_test`
  * value is false, and all of its child rows, byte-identical.
  *
  * **Validates: Requirements 17.7, 17.8**
@@ -227,7 +227,7 @@ class TestRecordDeletionPropertyTest extends WP_UnitTestCase {
 			array(
 				'is_test'          => \Eris\Generators::elements( array( true, false ) ),
 				'email'            => Generators::email(),
-				'dates'            => Generators::candidate_dates( 1, 3 ),
+				'ranges'           => Generators::candidate_ranges( 1, 3 ),
 				'event_type'       => Generators::term_set( 0, 2 ),
 				'site_exclusivity' => Generators::term_set( 0, 2 ),
 				'notes'            => \Eris\Generators::choose( 0, self::MAX_CHILD_ROWS ),
@@ -265,7 +265,7 @@ class TestRecordDeletionPropertyTest extends WP_UnitTestCase {
 					'source'     => 'webhook:fixture',
 					'is_test'    => $is_test ? 1 : 0,
 				),
-				$record['dates'],
+				$record['ranges'],
 				array(
 					'event_type'       => $record['event_type'],
 					'site_exclusivity' => $record['site_exclusivity'],

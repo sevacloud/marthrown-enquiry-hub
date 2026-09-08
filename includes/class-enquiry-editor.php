@@ -89,7 +89,7 @@ class EnquiryEditor {
 		'phone',
 		'total_guests',
 		'message',
-		'selected_dates',
+		'date_ranges',
 		'event_type',
 		'site_exclusivity',
 	);
@@ -146,7 +146,7 @@ class EnquiryEditor {
 		$updated = EnquiryStore::update(
 			$enquiry_id,
 			(array) $checked['values'],
-			self::dates( $submitted, $checked ),
+			self::ranges( $submitted, $checked ),
 			self::terms( $checked )
 		);
 
@@ -212,22 +212,23 @@ class EnquiryEditor {
 	}
 
 	/**
-	 * The replacement candidate-date set, or null when the request left it alone.
+	 * The replacement candidate date ranges, or null when the request left them
+	 * alone.
 	 *
-	 * `null` is the store's "not submitted"; an array replaces the set wholesale.
-	 * A submitted-but-empty set never reaches here — it is a presence failure
-	 * under both profiles (Requirement 19.4).
+	 * `null` is the store's "not submitted"; an array replaces the whole list
+	 * wholesale, ideal range first. A submitted-but-empty list never reaches here
+	 * — it is a presence failure under both profiles (Requirement 19.4).
 	 *
 	 * @param array $submitted Editable fields the request carried.
 	 * @param array $checked   Validator result.
 	 * @return array|null
 	 */
-	protected static function dates( array $submitted, array $checked ) {
-		if ( ! array_key_exists( 'selected_dates', $submitted ) ) {
+	protected static function ranges( array $submitted, array $checked ) {
+		if ( ! array_key_exists( 'date_ranges', $submitted ) ) {
 			return null;
 		}
 
-		return isset( $checked['dates'] ) ? (array) $checked['dates'] : array();
+		return isset( $checked['ranges'] ) ? (array) $checked['ranges'] : array();
 	}
 
 	/**

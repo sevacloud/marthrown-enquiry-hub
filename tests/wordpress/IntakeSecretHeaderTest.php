@@ -133,6 +133,12 @@ class IntakeSecretHeaderTest extends WP_UnitTestCase {
 
 		update_option( IntakeEndpoint::SECRET_OPTION, self::SECRET );
 		update_option( IntakeEndpoint::SOURCE_FIELD_OPTION, self::SOURCE_FIELD );
+
+		// A sending form has no single field for a date range, so the two payload
+		// fields holding the ideal range are named in Settings and the endpoint
+		// gathers them into `date_ranges`.
+		update_option( IntakeEndpoint::START_DATE_FIELD_OPTION, 'Start Date' );
+		update_option( IntakeEndpoint::END_DATE_FIELD_OPTION, 'End Date' );
 		delete_option( FieldMapper::OPTION );
 
 		// A server of this test's own, so the route table holds what this test
@@ -386,8 +392,12 @@ class IntakeSecretHeaderTest extends WP_UnitTestCase {
 					'value' => '40',
 				),
 				array(
-					'label' => 'Selected Dates',
-					'value' => '2025-10-04, 2025-10-11',
+					'label' => 'Start Date',
+					'value' => '2025-10-04',
+				),
+				array(
+					'label' => 'End Date',
+					'value' => '2025-10-11',
 				),
 				array(
 					'label' => 'Event Type',

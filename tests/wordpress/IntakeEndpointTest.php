@@ -140,6 +140,15 @@ class IntakeEndpointTest extends WP_UnitTestCase {
 		update_option( IntakeEndpoint::SECRET_OPTION, self::SECRET );
 		update_option( IntakeEndpoint::SOURCE_FIELD_OPTION, self::SOURCE_FIELD );
 
+		// A sending form has no single field for a date range, so each range
+		// arrives as two payload fields named in Settings. Both senders below fill
+		// in the ideal pair and one alternative, so the gathering the endpoint does
+		// is part of what the two are compared on.
+		update_option( IntakeEndpoint::START_DATE_FIELD_OPTION, 'Start Date' );
+		update_option( IntakeEndpoint::END_DATE_FIELD_OPTION, 'End Date' );
+		update_option( 'meh_intake_start_date_field_2', 'Alternative Start' );
+		update_option( 'meh_intake_end_date_field_2', 'Alternative End' );
+
 		// Requirement 2.12: no mapping control is set, so nothing here is
 		// configured for either of the two senders below.
 		delete_option( FieldMapper::OPTION );
@@ -273,9 +282,30 @@ class IntakeEndpointTest extends WP_UnitTestCase {
 
 		// The delimited strings the Kadence-shaped body delivered arrive as the
 		// same lists the flat body delivered directly.
-		$this->assertSame( array( '2025-09-06', '2025-09-13' ), $kadence['Selected Dates'] );
 		$this->assertSame( array( 'wedding' ), $kadence['Event Type'] );
 		$this->assertSame( array( 'full site' ), $kadence['Site Exclusivity'] );
+
+		// The four configured date fields arrive as the two ranges they name,
+		// ideal range first, and are gone from the map under their own names: a
+		// field read as one bound of a range has no second reading.
+		$this->assertSame(
+			array(
+				array(
+					'start' => '2025-09-06',
+					'end'   => '2025-09-07',
+				),
+				array(
+					'start' => '2025-09-13',
+					'end'   => '2025-09-13',
+				),
+			),
+			$kadence['date_ranges'],
+			'The configured start and end fields arrive as `date_ranges`.'
+		);
+
+		foreach ( array( 'Start Date', 'End Date', 'Alternative Start', 'Alternative End' ) as $field ) {
+			$this->assertArrayNotHasKey( $field, $kadence, $field . ' is consumed by the range it supplies.' );
+		}
 
 		$this->assertSame( $this->comparable( $generic ), $this->comparable( $kadence ) );
 	}
@@ -430,8 +460,20 @@ class IntakeEndpointTest extends WP_UnitTestCase {
 					'value' => '40',
 				),
 				array(
-					'label' => 'Selected Dates',
-					'value' => '2025-09-06, 2025-09-13',
+					'label' => 'Start Date',
+					'value' => '2025-09-06',
+				),
+				array(
+					'label' => 'End Date',
+					'value' => '2025-09-07',
+				),
+				array(
+					'label' => 'Alternative Start',
+					'value' => '2025-09-13',
+				),
+				array(
+					'label' => 'Alternative End',
+					'value' => '2025-09-13',
 				),
 				array(
 					'label' => 'Event Type',
@@ -456,16 +498,19 @@ class IntakeEndpointTest extends WP_UnitTestCase {
 	 */
 	private function generic_body() {
 		return array(
-			self::SOURCE_FIELD => 'generic-enquiry',
-			'First Name'       => 'Grace',
-			'Last Name'        => 'Hopper',
-			'Email'            => self::EMAIL,
-			'Phone'            => '0114 496 0000',
-			'Total Guests'     => '40',
-			'Selected Dates'   => array( '2025-09-06', '2025-09-13' ),
-			'Event Type'       => array( 'wedding' ),
-			'Site Exclusivity' => array( 'full site' ),
-			'Message'          => 'Looking at the barn for a September wedding.',
+			self::SOURCE_FIELD  => 'generic-enquiry',
+			'First Name'        => 'Grace',
+			'Last Name'         => 'Hopper',
+			'Email'             => self::EMAIL,
+			'Phone'             => '0114 496 0000',
+			'Total Guests'      => '40',
+			'Start Date'        => '2025-09-06',
+			'End Date'          => '2025-09-07',
+			'Alternative Start' => '2025-09-13',
+			'Alternative End'   => '2025-09-13',
+			'Event Type'        => array( 'wedding' ),
+			'Site Exclusivity'  => array( 'full site' ),
+			'Message'           => 'Looking at the barn for a September wedding.',
 		);
 	}
 

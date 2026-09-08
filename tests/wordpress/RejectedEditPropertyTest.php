@@ -5,10 +5,11 @@
  * Feature: enquiry-data-layer, Property 41: For any enquiry and any enquiry edit
  * request carrying at least one value that fails a Requirement 3 criterion naming
  * its field under the Manual Validation Profile in partial mode — including
- * `first_name`, `last_name`, `email` or `selected_dates` present and submitted
+ * `first_name`, `last_name`, `email` or `date_ranges` present and submitted
  * empty, which fails, as distinct from those fields being absent, which does not
  * — alongside any number of valid values, the response is 400 naming every field
- * that fails validation, and the enquiry's stored field values, candidate dates,
+ * that fails validation, and the enquiry's stored field values, candidate date
+ * ranges,
  * terms, notes, history and `updated_at` are byte-identical afterwards: no valid
  * value from that request is applied. For any enquiry holding status `closed` and
  * any edit request body, valid or invalid, the response is 409 and the same
@@ -38,8 +39,10 @@
  *   to submit them empty, so those two draw an empty string or whitespace; `email`
  *   adds a malformed address; `phone` fails only by carrying no digit; `total_guests`
  *   fails out of range and as a non-whole number, which are separate codes;
- *   `selected_dates` fails empty, over ten entries, and on an entry naming no
- *   calendar date; and each taxonomy fails on a value outside its vocabulary.
+ *   `date_ranges` fails empty, over three ranges, on a range naming no calendar
+ *   date, on a range naming only one of its two bounds, and on a range whose last
+ *   day precedes its first; and each taxonomy fails on a value outside its
+ *   vocabulary.
  *   `message` is absent from the breakable set on purpose — under the Manual
  *   profile it is optional and carries no value rule, so no submitted `message`
  *   can be rejected (Requirement 3.18), and pretending otherwise would be
@@ -54,13 +57,13 @@
  *   same code for each, so a validator returning on its first failure fails here.
  * - **Valid values ride along on the same request**, drawn as any subset of the
  *   fields the case did not break, and every one of them is chosen to differ from
- *   what the fixture stores: the fixture's scalars, dates and terms all sit
+ *   what the fixture stores: the fixture's scalars, ranges and terms all sit
  *   outside what the valid generators can emit. That is what makes "no valid value
  *   from that request is applied" a real assertion rather than a comparison of
  *   equal values (Requirement 19.4).
  * - **"Byte-identical" is asserted as a whole-row comparison**, not as a list of
  *   fields: the hydrated enquiry is read before and after, which covers
- *   `updated_at`, the candidate dates, both taxonomies and every column this test
+ *   `updated_at`, the candidate ranges, both taxonomies and every column this test
  *   did not think to name in one assertion. Notes and history are compared
  *   verbatim, entries and all, and every Enquiry Store table's row count is
  *   compared too, so a stray insert anywhere — a rejection row, a history entry,
@@ -148,7 +151,7 @@ class RejectedEditPropertyTest extends WP_UnitTestCase {
 		'phone',
 		'total_guests',
 		'message',
-		'selected_dates',
+		'date_ranges',
 		'event_type',
 		'site_exclusivity',
 	);
@@ -168,7 +171,7 @@ class RejectedEditPropertyTest extends WP_UnitTestCase {
 		'email',
 		'phone',
 		'total_guests',
-		'selected_dates',
+		'date_ranges',
 		'event_type',
 		'site_exclusivity',
 	);
@@ -191,8 +194,10 @@ class RejectedEditPropertyTest extends WP_UnitTestCase {
 		'no_digits'     => 'no_digits',
 		'out_of_range'  => 'out_of_range',
 		'not_whole'     => 'not_whole_number',
-		'too_many'      => 'too_many_dates',
+		'too_many'      => 'too_many_ranges',
 		'unparseable'   => 'unparseable_date',
+		'half_range'    => 'unparseable_date',
+		'reversed'      => 'ends_before_start',
 		'not_allowed'   => 'not_allowed',
 	);
 
@@ -223,15 +228,26 @@ class RejectedEditPropertyTest extends WP_UnitTestCase {
 	const SEEDED_EXCLUSIVITY = 'shared-use';
 
 	/**
-	 * The candidate dates every fixture stores.
+	 * The candidate date ranges every fixture stores.
 	 *
-	 * Before `Generators::BASE_DATE`, which every generated candidate date counts
-	 * forward from, so a generated valid date set can never coincide with the
-	 * stored one.
+	 * Both bounds sit before `Generators::BASE_DATE`, which every generated
+	 * candidate range counts forward from, so a generated valid range set can
+	 * never coincide with the stored one. One multi-day range and one single day,
+	 * so a write that collapsed a range to its first day, or expanded a day into
+	 * a span, would show up in the before/after comparison.
 	 *
-	 * @var string[]
+	 * @var array<int,array{start:string,end:string}>
 	 */
-	const SEEDED_DATES = array( '2024-03-01', '2024-03-02' );
+	const SEEDED_RANGES = array(
+		array(
+			'start' => '2024-03-01',
+			'end'   => '2024-03-04',
+		),
+		array(
+			'start' => '2024-03-11',
+			'end'   => '2024-03-11',
+		),
+	);
 
 	/**
 	 * The administrator every request is made as.
@@ -616,13 +632,30 @@ class RejectedEditPropertyTest extends WP_UnitTestCase {
 			);
 		}
 
-		if ( 'selected_dates' === $field ) {
+		if ( 'date_ranges' === $field ) {
 			return \Eris\Generators::oneOf(
 				self::mode( 'empty_string', \Eris\Generators::constant( '' ) ),
 				self::mode( 'empty_list', \Eris\Generators::constant( array() ) ),
-				self::mode( 'blank_list', \Eris\Generators::constant( array( '   ', '' ) ) ),
-				self::mode( 'too_many', Generators::oversized_candidate_dates() ),
-				self::mode( 'unparseable', self::dates_with_one_unparseable() )
+				self::mode(
+					'blank_list',
+					// A range with both bounds blank, rather than a list of blank
+					// strings: the route declares `date_ranges` as a list of
+					// objects, so a bare string would be refused by core's own
+					// schema check before the Validator saw it, which is a
+					// different refusal from the one this property is about.
+					\Eris\Generators::constant(
+						array(
+							array(
+								'start' => '   ',
+								'end'   => '',
+							),
+						)
+					)
+				),
+				self::mode( 'too_many', Generators::oversized_candidate_ranges() ),
+				self::mode( 'unparseable', self::ranges_with_one_unparseable() ),
+				self::mode( 'half_range', self::ranges_with_one_half_named() ),
+				self::mode( 'reversed', self::reversed_range() )
 			);
 		}
 
@@ -649,27 +682,84 @@ class RejectedEditPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * A candidate date set inside the accepted count carrying one entry that names
-	 * no calendar date (Requirement 3.6).
+	 * A candidate range set inside the accepted count carrying one range whose
+	 * bounds name no calendar date (Requirement 3.6).
 	 *
-	 * Nine valid dates at most, so the count rule cannot fire first and change
-	 * which code the failure earns.
+	 * Two valid ranges at most, so the count rule cannot fire first and change
+	 * which code the failure earns. Both bounds of the added range are the same
+	 * unparseable text, so the reversed-range rule cannot fire on it either: the
+	 * mode under test is the one it says it is.
 	 *
 	 * @return \Eris\Generator
 	 */
-	protected static function dates_with_one_unparseable() {
+	protected static function ranges_with_one_unparseable() {
 		return \Eris\Generators::map(
 			function ( array $parts ) {
-				list( $dates, $bad ) = $parts;
+				list( $ranges, $bad ) = $parts;
 
-				$dates   = array_values( (array) $dates );
-				$dates[] = (string) $bad;
+				$ranges   = array_values( (array) $ranges );
+				$ranges[] = array(
+					'start' => (string) $bad,
+					'end'   => (string) $bad,
+				);
 
-				return $dates;
+				return $ranges;
 			},
 			\Eris\Generators::tuple(
-				Generators::candidate_dates( 0, Generators::DATES_MAX - 1 ),
+				Generators::candidate_ranges( 0, Generators::RANGES_MAX - 1 ),
 				Generators::unparseable_date()
+			)
+		);
+	}
+
+	/**
+	 * A candidate range set inside the accepted count carrying one range that
+	 * names its first day and leaves its last unsaid.
+	 *
+	 * The code this earns is `unparseable_date` rather than `incomplete_range`,
+	 * and stating that here is the point of the mode: the route's
+	 * `sanitize_range_list` gives every entry both keys, filling in the bound the
+	 * client omitted with an empty string, so a half-named range reaches the
+	 * Validator as one whose second bound names no date. `incomplete_range`
+	 * answers a caller that reached the Validator without passing through the
+	 * route, which no request can do (Requirement 18.3).
+	 *
+	 * @return \Eris\Generator
+	 */
+	protected static function ranges_with_one_half_named() {
+		return \Eris\Generators::map(
+			function ( array $parts ) {
+				list( $ranges, $day ) = $parts;
+
+				$ranges   = array_values( (array) $ranges );
+				$ranges[] = array( 'start' => (string) $day );
+
+				return $ranges;
+			},
+			\Eris\Generators::tuple(
+				Generators::candidate_ranges( 0, Generators::RANGES_MAX - 1 ),
+				Generators::candidate_date()
+			)
+		);
+	}
+
+	/**
+	 * One candidate range whose last day precedes its first (Requirement 3.7).
+	 *
+	 * Fixed rather than generated: both bounds name a real date, they are the
+	 * wrong way round, and that is the whole of the failure. A generated pair
+	 * would add nothing but the risk of drawing two equal dates, which is a
+	 * single-day range and passes.
+	 *
+	 * @return \Eris\Generator
+	 */
+	protected static function reversed_range() {
+		return \Eris\Generators::constant(
+			array(
+				array(
+					'start' => '2031-05-10',
+					'end'   => '2031-05-04',
+				),
 			)
 		);
 	}
@@ -830,7 +920,7 @@ class RejectedEditPropertyTest extends WP_UnitTestCase {
 	 * Only the three fields whose generators can land on a stored value need
 	 * adjusting: the two taxonomies draw from the same vocabulary the fixture
 	 * stores a value from, and `total_guests` draws from the same 1 to 10000
-	 * range. The scalars and the candidate dates are stored as values no
+	 * range. The scalars and the candidate ranges are stored as values no
 	 * generator emits, so they arrive different by construction.
 	 *
 	 * @param string $field Field name.
@@ -932,7 +1022,7 @@ class RejectedEditPropertyTest extends WP_UnitTestCase {
 				'status_changed_at'       => self::SEEDED_AT,
 				'source'                  => 'webhook:rejected-edit-fixture',
 			),
-			self::SEEDED_DATES,
+			self::SEEDED_RANGES,
 			array(
 				'event_type'       => array( self::SEEDED_EVENT_TYPE ),
 				'site_exclusivity' => array( self::SEEDED_EXCLUSIVITY ),

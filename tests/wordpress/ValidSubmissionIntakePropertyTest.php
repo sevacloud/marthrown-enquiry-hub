@@ -454,8 +454,9 @@ class ValidSubmissionIntakePropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The candidate dates and both multi-select fields equal the submitted values
-	 * as sets (Requirements 2.5, 2.1).
+	 * The candidate ranges equal the submitted ones in the submitted order, and
+	 * both multi-select fields equal the submitted values as sets
+	 * (Requirements 2.5, 2.1).
 	 *
 	 * @param array  $enquiry   Stored enquiry.
 	 * @param array  $submitted Submitted field map.
@@ -463,7 +464,16 @@ class ValidSubmissionIntakePropertyTest extends WP_UnitTestCase {
 	 * @return void
 	 */
 	private function assert_sets( array $enquiry, array $submitted, $label ) {
-		foreach ( array( 'selected_dates', 'event_type', 'site_exclusivity' ) as $field ) {
+		// Compared as a list rather than as a set: the first range is the ideal
+		// one and the rest are alternatives in preference order, so rank is part
+		// of the value and a reordered list is a different answer.
+		$this->assertSame(
+			array_values( (array) $submitted['date_ranges'] ),
+			$enquiry['date_ranges'],
+			'Stored date_ranges equals the submitted list, in the submitted order. ' . $label
+		);
+
+		foreach ( array( 'event_type', 'site_exclusivity' ) as $field ) {
 			$this->assertSame(
 				self::as_set( $submitted[ $field ] ),
 				self::as_set( $enquiry[ $field ] ),

@@ -285,7 +285,7 @@ class SharedCreationPathTest extends WP_UnitTestCase {
 		// here rather than passing.
 		$compared = $this->comparable( $webhook );
 
-		foreach ( array( 'first_name', 'email', 'total_guests', 'status', 'created_at', 'updated_at', 'status_changed_at', 'is_test', 'crm_sync_state', 'fluentcrm_subscriber_id', 'selected_dates', 'event_type', 'site_exclusivity', 'payload' ) as $column ) {
+		foreach ( array( 'first_name', 'email', 'total_guests', 'status', 'created_at', 'updated_at', 'status_changed_at', 'is_test', 'crm_sync_state', 'fluentcrm_subscriber_id', 'date_ranges', 'event_type', 'site_exclusivity', 'payload' ) as $column ) {
 			$this->assertArrayHasKey( $column, $compared, 'The comparison covers ' . $column . '.' );
 		}
 
@@ -354,7 +354,7 @@ class SharedCreationPathTest extends WP_UnitTestCase {
 		// the enquiry the webhook just created.
 		$this->assertGreaterThan(
 			0,
-			DuplicateDetector::find_duplicate( $email, (array) $fields['selected_dates'] ),
+			DuplicateDetector::find_duplicate( $email, (array) $fields['date_ranges'] ),
 			'The duplicate detector reports a match, so a route consulting it would refuse.'
 		);
 
@@ -422,7 +422,16 @@ class SharedCreationPathTest extends WP_UnitTestCase {
 			'email'            => (string) $email,
 			'phone'            => '01142 700 700',
 			'total_guests'     => '80',
-			'selected_dates'   => array( '2025-08-16', '2025-08-23' ),
+			'date_ranges'      => array(
+				array(
+					'start' => '2025-08-16',
+					'end'   => '2025-08-18',
+				),
+				array(
+					'start' => '2025-08-23',
+					'end'   => '2025-08-23',
+				),
+			),
 			'event_type'       => array( 'wedding' ),
 			'site_exclusivity' => array( 'full site' ),
 			'message'          => 'We would like to hold the ceremony outdoors.',

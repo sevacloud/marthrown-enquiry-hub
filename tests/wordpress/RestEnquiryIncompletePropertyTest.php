@@ -141,8 +141,8 @@ class RestEnquiryIncompletePropertyTest extends WP_UnitTestCase {
 	/** Sentinel history description. */
 	const HISTORY = 'QQQ-history-description';
 
-	/** Most candidate dates one generated enquiry holds. */
-	const DATES_MAX = 3;
+	/** Most candidate date ranges one generated enquiry holds. */
+	const RANGES_MAX = 3;
 
 	/** Most notes and history entries one generated enquiry holds. */
 	const ENTRIES_MAX = 2;
@@ -180,7 +180,7 @@ class RestEnquiryIncompletePropertyTest extends WP_UnitTestCase {
 		'is_test',
 		'duplicated_from_id',
 		'duplicated_to_id',
-		'selected_dates',
+		'date_ranges',
 		'event_type',
 		'site_exclusivity',
 		'payload',
@@ -319,7 +319,7 @@ class RestEnquiryIncompletePropertyTest extends WP_UnitTestCase {
 						array(
 							'blanked' => $blanked,
 							'status'  => $case['status'],
-							'dates'   => (int) $case['date_count'],
+							'ranges'  => (int) $case['range_count'],
 							'notes'   => (int) $case['notes'],
 						)
 					);
@@ -378,8 +378,9 @@ class RestEnquiryIncompletePropertyTest extends WP_UnitTestCase {
 					'last_name'    => Generators::last_name(),
 					'phone'        => Generators::phone_or_empty(),
 					'total_guests' => Generators::total_guests_or_unsupplied(),
-					'date_count'   => \Eris\Generators::choose( 1, self::DATES_MAX ),
-					'date_offsets' => \Eris\Generators::vector( self::DATES_MAX, \Eris\Generators::choose( 1, 45 ) ),
+					'range_count'  => \Eris\Generators::choose( 1, self::RANGES_MAX ),
+					'range_gaps'   => \Eris\Generators::vector( self::RANGES_MAX, \Eris\Generators::choose( 1, 45 ) ),
+					'range_spans'  => \Eris\Generators::vector( self::RANGES_MAX, \Eris\Generators::choose( 0, 5 ) ),
 					'terms'        => \Eris\Generators::choose( 0, count( self::TERM_SETS ) - 1 ),
 					'notes'        => \Eris\Generators::choose( 0, self::ENTRIES_MAX ),
 					'entries'      => \Eris\Generators::choose( 0, self::ENTRIES_MAX ),
@@ -529,7 +530,7 @@ class RestEnquiryIncompletePropertyTest extends WP_UnitTestCase {
 
 		$sentinels = array_merge(
 			array( self::MESSAGE, self::NOTE, self::SOURCE, self::PAYLOAD, self::HISTORY ),
-			self::dates( $case )
+			self::range_bounds( $case )
 		);
 
 		if ( ! in_array( 'email', $blanked, true ) ) {
@@ -599,7 +600,7 @@ class RestEnquiryIncompletePropertyTest extends WP_UnitTestCase {
 
 		$id = EnquiryStore::create(
 			$fields,
-			self::dates( $case ),
+			self::ranges( $case ),
 			array(
 				'event_type'       => $terms,
 				'site_exclusivity' => $terms ? array( 'exclusive-use' ) : array(),
@@ -658,21 +659,51 @@ class RestEnquiryIncompletePropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The candidate dates one generated case holds, distinct and ascending.
+	 * The candidate date ranges one generated case holds, distinct and ascending.
+	 *
+	 * Each range starts after the previous one ended, so no two of them overlap
+	 * and the store cannot collapse two into one: the row count this property
+	 * seeds is the count it asked for. A span of zero days is a single day, which
+	 * is a range like any other.
+	 *
+	 * @param array $case Generated case.
+	 * @return array<int,array{start:string,end:string}>
+	 */
+	private static function ranges( array $case ) {
+		$ranges = array();
+		$gaps   = array_values( (array) $case['range_gaps'] );
+		$spans  = array_values( (array) $case['range_spans'] );
+		$offset = 0;
+
+		for ( $index = 0; $index < (int) $case['range_count']; $index++ ) {
+			$offset  += max( 1, (int) $gaps[ $index ] );
+			$span     = max( 0, (int) $spans[ $index ] );
+			$ranges[] = array(
+				'start' => Generators::date_at( $offset ),
+				'end'   => Generators::date_at( $offset + $span ),
+			);
+
+			$offset += $span;
+		}
+
+		return $ranges;
+	}
+
+	/**
+	 * Every date one generated case names, as a flat list of sentinels.
 	 *
 	 * @param array $case Generated case.
 	 * @return string[]
 	 */
-	private static function dates( array $case ) {
-		$dates  = array();
-		$offset = 0;
+	private static function range_bounds( array $case ) {
+		$bounds = array();
 
-		foreach ( array_slice( (array) $case['date_offsets'], 0, (int) $case['date_count'] ) as $gap ) {
-			$offset += max( 1, (int) $gap );
-			$dates[] = Generators::date_at( $offset );
+		foreach ( self::ranges( $case ) as $range ) {
+			$bounds[] = $range['start'];
+			$bounds[] = $range['end'];
 		}
 
-		return $dates;
+		return array_values( array_unique( $bounds ) );
 	}
 
 	/**

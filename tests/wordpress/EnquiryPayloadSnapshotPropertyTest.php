@@ -85,7 +85,7 @@ class EnquiryPayloadSnapshotPropertyTest extends WP_UnitTestCase {
 	 */
 	const KEYS = array(
 		'first_name',
-		'selected_dates',
+		'date_ranges',
 		'event_type',
 		'Zoë',
 		'名前',

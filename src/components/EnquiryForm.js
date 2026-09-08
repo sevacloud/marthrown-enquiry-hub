@@ -21,22 +21,20 @@
  *
  * Validation itself belongs to the server — one authority, applied to the
  * webhook and to these two routes alike — so the form marks `first_name`,
- * `last_name`, `email` and the start date required, marks the other five
+ * `last_name`, `email` and the ideal start date required, marks the other five
  * optional, and renders whatever a 400 names. The `errors` map is read whole
  * and rendered against each field it names, so a submission failing on three
  * fields reports all three in one pass instead of one per attempt.
  *
- * Candidate dates are still a *set* in the store and the Validator — an
- * enquiry can hold 1 to 10 individual days, and nothing about that changed.
- * What changed is what a person types here: rather than adding date rows one
- * at a time, they choose a start date and an end date, and this form expands
- * every day in between (inclusive) into the same `selected_dates` list the
- * API has always accepted. An end date left blank is read as "just the one
- * day" — the start date alone. This mirrors the same expansion
- * `IntakeEndpoint::expand_date_range()` applies to a webhook configured to
- * send a start/end pair instead of a date list, so a manually entered
- * enquiry and one received from the customer-facing form arrive at the same
- * shape.
+ * Candidate dates are *ranges*, ranked. The form renders three start/end pairs
+ * in a fixed order: the first is the ideal range and is required, the second
+ * and third are optional alternatives the enquirer would settle for. That rank
+ * is the whole point of the ordering — the store keeps the ranges in the order
+ * they are sent — so the slots are never reordered or sorted by date. An end
+ * date left blank is read as "just the one day", the start date alone, because
+ * a single day is a range whose bounds match. A slot left entirely blank is not
+ * sent at all, so filling the first and third slots submits two ranges rather
+ * than three with a hole in the middle.
  *
  * `status`, `source`, `is_test`, `booking_id` and the payload snapshot are
  * neither rendered nor submitted: none is a correctable detail, and the edit
@@ -64,7 +62,7 @@ const LABELS = {
 	email: __( 'Email', 'marthrown-enquiry-hub' ),
 	phone: __( 'Phone', 'marthrown-enquiry-hub' ),
 	total_guests: __( 'Total guests', 'marthrown-enquiry-hub' ),
-	selected_dates: __( 'Candidate dates', 'marthrown-enquiry-hub' ),
+	date_ranges: __( 'Candidate dates', 'marthrown-enquiry-hub' ),
 	event_type: __( 'Event type', 'marthrown-enquiry-hub' ),
 	site_exclusivity: __( 'Site exclusivity', 'marthrown-enquiry-hub' ),
 	message: __( 'Message', 'marthrown-enquiry-hub' ),
@@ -103,14 +101,27 @@ function vocabularyFor( field ) {
 }
 
 /**
- * Candidate date ceiling, matching the validator's own (Requirement 3.5).
+ * The candidate ranges the form collects: one ideal, two alternatives.
  *
- * Shown as a hint rather than enforced client-side: a range longer than this
- * is still sent, and the server answers `too_many_dates` against
- * `selected_dates` exactly as it would for ten manually added rows, which the
- * existing `FieldError` on the fieldset already renders.
+ * The count matches the Validator's `MAX_RANGES`, and the slots are rendered
+ * rather than added, so the form cannot offer a fourth. Where the two agree
+ * there is nothing to enforce here; where an enquiry stored before this cap
+ * existed carries more, `initialValues()` shows the first three (see there).
  */
-const MAX_DATES = 10;
+const RANGE_SLOTS = [
+	{
+		legend: __( 'Ideal dates', 'marthrown-enquiry-hub' ),
+		required: true,
+	},
+	{
+		legend: __( 'Alternative dates', 'marthrown-enquiry-hub' ),
+		required: false,
+	},
+	{
+		legend: __( 'Second alternative dates', 'marthrown-enquiry-hub' ),
+		required: false,
+	},
+];
 
 /**
  * Readable text for the codes the `errors` map carries.
@@ -134,12 +145,20 @@ const MESSAGES = {
 		'Enter a guest count from 1 to 10000.',
 		'marthrown-enquiry-hub'
 	),
-	too_few_dates: __(
-		'Choose at least one candidate date.',
+	too_few_ranges: __(
+		'Give the ideal dates.',
 		'marthrown-enquiry-hub'
 	),
-	too_many_dates: __(
-		'Choose no more than ten candidate dates.',
+	too_many_ranges: __(
+		'Give no more than three date ranges.',
+		'marthrown-enquiry-hub'
+	),
+	incomplete_range: __(
+		'Give both a start and an end date for each range.',
+		'marthrown-enquiry-hub'
+	),
+	ends_before_start: __(
+		'A range cannot end before it starts.',
 		'marthrown-enquiry-hub'
 	),
 	unparseable_date: __(
@@ -170,6 +189,16 @@ export default function EnquiryForm( { enquiry = null, onSaved, onCancel } ) {
 
 	const set = ( field ) => ( value ) =>
 		setValues( ( prev ) => ( { ...prev, [ field ]: value } ) );
+
+	// One bound of one range slot. The slots are replaced as a new array rather
+	// than mutated in place, so React sees the change.
+	const setBound = ( index, bound, value ) =>
+		setValues( ( prev ) => ( {
+			...prev,
+			ranges: prev.ranges.map( ( range, at ) =>
+				at === index ? { ...range, [ bound ]: value } : range
+			),
+		} ) );
 
 	const onSubmit = async ( event ) => {
 		event.preventDefault();
@@ -266,52 +295,73 @@ export default function EnquiryForm( { enquiry = null, onSaved, onCancel } ) {
 			<FieldError code={ errors.email } />
 
 			<fieldset className="meh-form__dates">
-				<legend>
-					{ LABELS.selected_dates }{ ' ' }
-					<span className="meh-form__required">
-						{ __( '(required)', 'marthrown-enquiry-hub' ) }
-					</span>
-				</legend>
+				<legend>{ LABELS.date_ranges }</legend>
 
-				<div className="meh-form__date">
-					<label className="meh-date-label">
-						{ __( 'Start date', 'marthrown-enquiry-hub' ) }
-						<input
-							type="date"
-							value={ values.date_start }
-							required
-							onChange={ ( e ) =>
-								set( 'date_start' )( e.target.value )
-							}
-						/>
-					</label>
-				</div>
+				{ RANGE_SLOTS.map( ( slot, index ) => (
+					<div className="meh-form__range" key={ index }>
+						<span className="meh-form__range-legend">
+							{ slot.legend }{ ' ' }
+							<span className="meh-form__required">
+								{ slot.required
+									? __(
+											'(required)',
+											'marthrown-enquiry-hub'
+									  )
+									: __(
+											'(optional)',
+											'marthrown-enquiry-hub'
+									  ) }
+							</span>
+						</span>
 
-				<div className="meh-form__date">
-					<label className="meh-date-label">
-						{ __( 'End date', 'marthrown-enquiry-hub' ) }
-						<input
-							type="date"
-							value={ values.date_end }
-							onChange={ ( e ) =>
-								set( 'date_end' )( e.target.value )
-							}
-						/>
-					</label>
-				</div>
+						<div className="meh-form__date">
+							<label className="meh-date-label">
+								{ __(
+									'Start date',
+									'marthrown-enquiry-hub'
+								) }
+								<input
+									type="date"
+									value={ values.ranges[ index ].start }
+									required={ slot.required }
+									onChange={ ( e ) =>
+										setBound(
+											index,
+											'start',
+											e.target.value
+										)
+									}
+								/>
+							</label>
+						</div>
+
+						<div className="meh-form__date">
+							<label className="meh-date-label">
+								{ __( 'End date', 'marthrown-enquiry-hub' ) }
+								<input
+									type="date"
+									value={ values.ranges[ index ].end }
+									onChange={ ( e ) =>
+										setBound( index, 'end', e.target.value )
+									}
+								/>
+							</label>
+						</div>
+					</div>
+				) ) }
 
 				<p className="description">
 					{ sprintf(
-						/* translators: %d: maximum number of candidate dates. */
+						/* translators: %d: number of candidate date ranges collected. */
 						__(
-							'Every day from the start date to the end date is added as a candidate date, up to %d.  Leave the end date blank for a single day.',
+							'Give the ideal dates and up to %d alternatives, best first.  Leave an end date blank for a single day.',
 							'marthrown-enquiry-hub'
 						),
-						MAX_DATES
+						RANGE_SLOTS.length - 1
 					) }
 				</p>
 
-				<FieldError code={ errors.selected_dates } />
+				<FieldError code={ errors.date_ranges } />
 			</fieldset>
 
 			<TextControl
@@ -416,27 +466,15 @@ function FieldError( { code } ) {
 /**
  * The form state a mode starts from.
  *
- * Create starts empty with one blank date row; edit starts from the displayed
- * enquiry's stored values, which is also the baseline the altered-field
- * comparison measures against.
+ * Create starts empty with three blank range slots; edit starts from the
+ * displayed enquiry's stored values, which is also the baseline the
+ * altered-field comparison measures against.
  *
  * @param {Object|null} enquiry Enquiry being corrected, or null when creating.
  * @return {Object} Form state.
  */
 function initialValues( enquiry ) {
 	const stored = enquiry || {};
-	const dates = list( stored.selected_dates ).sort();
-
-	// The start/end inputs show the earliest and latest stored candidate date.
-	// Where the stored set is not itself a contiguous run of days — which can
-	// only happen on an enquiry created before this form collected a range, or
-	// one a webhook populated as a genuine list — resaving the form without
-	// touching these two fields would replace that set with the full run
-	// between them. That narrowing mirrors the one already accepted for
-	// `event_type`/`site_exclusivity` above: opening the form on such an
-	// enquiry shows a range, not the exact stored set.
-	const dateStart = dates.length ? dates[ 0 ] : '';
-	const dateEnd = dates.length > 1 ? dates[ dates.length - 1 ] : '';
 
 	return {
 		first_name: text( stored.first_name ),
@@ -444,8 +482,7 @@ function initialValues( enquiry ) {
 		email: text( stored.email ),
 		phone: text( stored.phone ),
 		total_guests: text( stored.total_guests ),
-		date_start: dateStart,
-		date_end: dateEnd,
+		ranges: storedRanges( stored.date_ranges ),
 		// The dropdown holds one value: the first of whatever is stored, empty
 		// when nothing is. A stored set of more than one narrows to its first
 		// member the moment this form is opened on it (see the TAXONOMIES
@@ -457,60 +494,58 @@ function initialValues( enquiry ) {
 }
 
 /**
- * Every calendar day from a start date to an end date, inclusive.
+ * The stored candidate ranges as the form's three slots.
  *
- * Mirrors `IntakeEndpoint::days_between()` on the server, so a manually
- * entered range and one a webhook sends as a start/end pair expand into the
- * same candidate-date list. An end date left blank, or one before the start
- * date, yields just the start date alone rather than an error: the actual
- * `too_few_dates`/`unparseable_date` rejections remain the server's to make.
+ * Rank order is preserved exactly as stored — the first stored range is the
+ * ideal one — and the slots are padded to three so every input has a value to
+ * render. An enquiry stored before the cap existed can hold more than three
+ * ranges; those beyond the third are not shown, and saving the form therefore
+ * drops them. That narrowing is the same one already accepted for
+ * `event_type`/`site_exclusivity`: it happens on open, not silently on save.
  *
- * @param {string} start `YYYY-MM-DD`, or empty.
- * @param {string} end   `YYYY-MM-DD`, or empty.
- * @return {string[]} Candidate dates, oldest first.
+ * @param {*} stored Stored `date_ranges`.
+ * @return {Array<{start: string, end: string}>} Exactly three slots.
  */
-function daysBetween( start, end ) {
-	const startDate = parseIsoDate( start );
+function storedRanges( stored ) {
+	const ranges = Array.isArray( stored ) ? stored : [];
 
-	if ( ! startDate ) {
-		return [];
-	}
+	return RANGE_SLOTS.map( ( slot, index ) => {
+		const range = ranges[ index ];
 
-	const endDate = parseIsoDate( end ) || startDate;
-
-	if ( endDate < startDate ) {
-		return [ start ];
-	}
-
-	const days = [];
-	const cursor = new Date( startDate );
-
-	while ( cursor <= endDate && days.length <= MAX_DATES + 1 ) {
-		days.push( cursor.toISOString().slice( 0, 10 ) );
-		cursor.setUTCDate( cursor.getUTCDate() + 1 );
-	}
-
-	return days;
+		return {
+			start: range ? text( range.start ) : '',
+			end: range ? text( range.end ) : '',
+		};
+	} );
 }
 
 /**
- * A `YYYY-MM-DD` string as a UTC `Date`, or null when it does not parse.
+ * The range slots as the API's `date_ranges` list.
  *
- * Parsed as UTC midnight rather than through the local-timezone constructor,
- * so iterating a day at a time cannot skip or repeat a day around a daylight
- * saving transition.
+ * A slot with neither bound filled is not a range the enquirer named, so it is
+ * dropped rather than sent empty — which is what lets the second and third
+ * slots be optional. A slot with only a start is a single day, both bounds the
+ * same. A slot with only an end is sent as it stands, half-drawn, so the server
+ * answers `incomplete_range` rather than this form quietly inventing a start.
  *
- * @param {string} value Date input value.
- * @return {Date|null}
+ * @param {Array<{start: string, end: string}>} slots Form range slots.
+ * @return {Array<{start: string, end: string}>} Submittable ranges.
  */
-function parseIsoDate( value ) {
-	if ( ! /^\d{4}-\d{2}-\d{2}$/.test( String( value || '' ) ) ) {
-		return null;
-	}
+function submittedRanges( slots ) {
+	const ranges = [];
 
-	const date = new Date( `${ value }T00:00:00Z` );
+	( Array.isArray( slots ) ? slots : [] ).forEach( ( slot ) => {
+		const start = text( slot && slot.start ).trim();
+		const end = text( slot && slot.end ).trim();
 
-	return Number.isNaN( date.getTime() ) ? null : date;
+		if ( '' === start && '' === end ) {
+			return;
+		}
+
+		ranges.push( { start, end: '' === end ? start : end } );
+	} );
+
+	return ranges;
 }
 
 /**
@@ -529,7 +564,7 @@ function createFields( values ) {
 		first_name: submitted( values, 'first_name' ),
 		last_name: submitted( values, 'last_name' ),
 		email: submitted( values, 'email' ),
-		selected_dates: submitted( values, 'selected_dates' ),
+		date_ranges: submitted( values, 'date_ranges' ),
 	};
 
 	[ 'phone', 'total_guests', 'message', ...TAXONOMIES ].forEach( ( field ) => {
@@ -578,14 +613,11 @@ function alteredFields( values, initial ) {
  *
  * @param {Object} values Form state.
  * @param {string} field  Field name.
- * @return {string|string[]} Submittable value.
+ * @return {string|string[]|Array<Object>} Submittable value.
  */
 function submitted( values, field ) {
-	if ( 'selected_dates' === field ) {
-		return daysBetween(
-			values.date_start.trim(),
-			values.date_end.trim()
-		);
+	if ( 'date_ranges' === field ) {
+		return submittedRanges( values.ranges );
 	}
 
 	if ( TAXONOMIES.includes( field ) ) {
@@ -600,13 +632,20 @@ function submitted( values, field ) {
 /**
  * Whether two submittable values are the same value.
  *
- * @param {string|string[]} a First value.
- * @param {string|string[]} b Second value.
+ * Lists are compared in order, not as sets: promoting the second candidate
+ * range to the ideal one names the same days and changes which of them the
+ * enquirer would rather have, so it is an alteration worth submitting.
+ *
+ * @param {string|string[]|Array<Object>} a First value.
+ * @param {string|string[]|Array<Object>} b Second value.
  * @return {boolean} True when equal.
  */
 function same( a, b ) {
 	if ( Array.isArray( a ) || Array.isArray( b ) ) {
-		return list( a ).join( '\n' ) === list( b ).join( '\n' );
+		return (
+			JSON.stringify( Array.isArray( a ) ? a : [] ) ===
+			JSON.stringify( Array.isArray( b ) ? b : [] )
+		);
 	}
 
 	return a === b;

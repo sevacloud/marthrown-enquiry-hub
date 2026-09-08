@@ -132,7 +132,7 @@ class ExportEnquiries {
 			__( 'Total guests', 'marthrown-enquiry-hub' ),
 			__( 'Event type', 'marthrown-enquiry-hub' ),
 			__( 'Site exclusivity', 'marthrown-enquiry-hub' ),
-			__( 'Candidate dates', 'marthrown-enquiry-hub' ),
+			__( 'Candidate date ranges', 'marthrown-enquiry-hub' ),
 			__( 'Status', 'marthrown-enquiry-hub' ),
 			__( 'Source', 'marthrown-enquiry-hub' ),
 			__( 'Received', 'marthrown-enquiry-hub' ),
@@ -145,8 +145,8 @@ class ExportEnquiries {
 	 *
 	 * An unsupplied `total_guests` is the empty cell rather than `0`: the store
 	 * holds it as null precisely because no number was given, and a zero would
-	 * read as a party of none. The term sets and the candidate dates are joined
-	 * with a comma, which `fputcsv()` quotes for us.
+	 * read as a party of none. The term sets and the candidate date ranges are
+	 * joined with a comma, which `fputcsv()` quotes for us.
 	 *
 	 * @param array $enquiry Enquiry as the store hydrates it.
 	 * @return array
@@ -161,7 +161,7 @@ class ExportEnquiries {
 			isset( $enquiry['total_guests'] ) ? $enquiry['total_guests'] : '',
 			self::joined( $enquiry, 'event_type' ),
 			self::joined( $enquiry, 'site_exclusivity' ),
-			self::joined( $enquiry, 'selected_dates' ),
+			self::ranges( $enquiry ),
 			self::cell( $enquiry, 'status' ),
 			self::cell( $enquiry, 'source' ),
 			self::cell( $enquiry, 'created_at' ),
@@ -195,5 +195,42 @@ class ExportEnquiries {
 		}
 
 		return implode( ', ', $enquiry[ $field ] );
+	}
+
+	/**
+	 * The candidate date ranges as one cell, the ideal range first.
+	 *
+	 * Rank order is preserved rather than sorted chronologically, because the
+	 * first range is the one the enquirer would rather have and that is the fact
+	 * the reader of a spreadsheet is looking for. A range covering one day is
+	 * written as that day alone, so a single-date enquiry does not read as
+	 * `2026-05-01 to 2026-05-01`. The bound separator is the word `to` rather
+	 * than a dash, which spreadsheets are apt to read as arithmetic.
+	 *
+	 * @param array $enquiry Enquiry as the store hydrates it.
+	 * @return string
+	 */
+	protected static function ranges( array $enquiry ) {
+		if ( ! isset( $enquiry['date_ranges'] ) || ! is_array( $enquiry['date_ranges'] ) ) {
+			return '';
+		}
+
+		$cells = array();
+
+		foreach ( $enquiry['date_ranges'] as $range ) {
+			if ( ! is_array( $range ) || ! isset( $range['start'], $range['end'] ) ) {
+				continue;
+			}
+
+			$start = (string) $range['start'];
+			$end   = (string) $range['end'];
+
+			$cells[] = $start === $end
+				? $start
+				/* translators: 1: range start date, 2: range end date. */
+				: sprintf( __( '%1$s to %2$s', 'marthrown-enquiry-hub' ), $start, $end );
+		}
+
+		return implode( ', ', $cells );
 	}
 }

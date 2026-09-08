@@ -167,6 +167,12 @@ class SoftDependencyGateTest extends WP_UnitTestCase {
 
 		update_option( IntakeEndpoint::SECRET_OPTION, self::SECRET );
 		update_option( IntakeEndpoint::SOURCE_FIELD_OPTION, self::SOURCE_FIELD );
+
+		// A sending form has no single field for a date range, so the two payload
+		// fields holding the ideal range are named in Settings and the endpoint
+		// gathers them into `date_ranges`.
+		update_option( IntakeEndpoint::START_DATE_FIELD_OPTION, 'Start Date' );
+		update_option( IntakeEndpoint::END_DATE_FIELD_OPTION, 'End Date' );
 		delete_option( FieldMapper::OPTION );
 
 		// Requirement 6.7: FluentCrmApi() resolves to nothing, as an inactive
@@ -333,7 +339,16 @@ class SoftDependencyGateTest extends WP_UnitTestCase {
 		$this->assertSame( self::EMAIL, $enquiry['email'] );
 		$this->assertSame( 'new', $enquiry['status'] );
 		$this->assertSame( IntakeEndpoint::SOURCE_PREFIX . self::FORM_ID, $enquiry['source'] );
-		$this->assertSame( array( '2025-10-04', '2025-10-11' ), $enquiry['selected_dates'] );
+		$this->assertSame(
+			array(
+				array(
+					'start' => '2025-10-04',
+					'end'   => '2025-10-11',
+				),
+			),
+			$enquiry['date_ranges'],
+			'The configured start and end fields arrive as the one ideal range.'
+		);
 		$this->assertSame( array( 'wedding' ), $enquiry['event_type'] );
 
 		// Requirements 5.2, 6.7: the linkage failure downgrades the enquiry and
@@ -461,7 +476,8 @@ class SoftDependencyGateTest extends WP_UnitTestCase {
 			'Email'            => self::EMAIL,
 			'Phone'            => '0114 496 0001',
 			'Total Guests'     => '60',
-			'Selected Dates'   => array( '2025-10-04', '2025-10-11' ),
+			'Start Date'       => '2025-10-04',
+			'End Date'         => '2025-10-11',
 			'Event Type'       => array( 'wedding' ),
 			'Site Exclusivity' => array( 'full site' ),
 			'Message'          => 'Enquiring about the barn for an October wedding.',

@@ -3,7 +3,7 @@
  * it.
  *
  * The single-enquiry route returns the panel's entire contents in one response
- * (Requirement 13.2): the stored fields, the candidate dates, both multi-select
+ * (Requirement 13.2): the stored fields, the candidate date ranges, both multi-select
  * value sets, the message, the notes, the history, the `crm_sync_state` in
  * whichever state it holds (Requirement 5.3), the linked booking identifier,
  * the FluentCRM contact URL, the same-email siblings and the permitted
@@ -92,13 +92,18 @@ const STATUS_LABELS = {
 const CLOSED = 'closed';
 
 /**
+ * How many days the booking-date control will offer (see `candidateDays()`).
+ */
+const MAX_BOOKING_DAYS = 90;
+
+/**
  * Labels for the stored values the summary lists.
  */
 const LABELS = {
 	email: __( 'Email', 'marthrown-enquiry-hub' ),
 	phone: __( 'Phone', 'marthrown-enquiry-hub' ),
 	total_guests: __( 'Total guests', 'marthrown-enquiry-hub' ),
-	selected_dates: __( 'Candidate dates', 'marthrown-enquiry-hub' ),
+	date_ranges: __( 'Candidate dates', 'marthrown-enquiry-hub' ),
 	event_type: __( 'Event type', 'marthrown-enquiry-hub' ),
 	site_exclusivity: __( 'Site exclusivity', 'marthrown-enquiry-hub' ),
 	source: __( 'Source', 'marthrown-enquiry-hub' ),
@@ -212,7 +217,10 @@ export default function EnquiryDetail( {
 	const status = enquiry ? String( enquiry.status || '' ) : '';
 	const isClosed = CLOSED === status;
 	const transitions = list( enquiry && enquiry.allowed_transitions );
-	const dates = list( enquiry && enquiry.selected_dates );
+	const ranges = list( enquiry && enquiry.date_ranges );
+	// A booking is one day, so the control offers the days the ranges cover
+	// rather than the ranges themselves.
+	const dates = candidateDays( ranges );
 	const bookingId = enquiry ? Number( enquiry.booking_id ) || 0 : 0;
 	const convertible = !! enquiry && ! isClosed && ! bookingId && dates.length > 0;
 
@@ -603,8 +611,21 @@ export default function EnquiryDetail( {
 						<Row label={ LABELS.total_guests }>
 							{ text( enquiry.total_guests ) || '—' }
 						</Row>
-						<Row label={ LABELS.selected_dates }>
-							{ dates.length > 0 ? dates.join( ', ' ) : '—' }
+						<Row label={ LABELS.date_ranges }>
+							{ ranges.length > 0 ? (
+								<ul className="meh-detail__ranges">
+									{ ranges.map( ( range, index ) => (
+										<li key={ index }>
+											<span className="meh-detail__range-rank">
+												{ rankLabel( index ) }
+											</span>{ ' ' }
+											{ rangeText( range ) }
+										</li>
+									) ) }
+								</ul>
+							) : (
+								'—'
+							) }
 						</Row>
 						<Row label={ LABELS.event_type }>
 							{ terms( enquiry.event_type ) }
@@ -1137,7 +1158,9 @@ function text( raw ) {
  */
 function value( raw ) {
 	if ( Array.isArray( raw ) ) {
-		return raw.map( ( item ) => text( item ) ).join( ', ' );
+		return raw
+			.map( ( item ) => ( isRange( item ) ? rangeText( item ) : text( item ) ) )
+			.join( ', ' );
 	}
 
 	const rendered = text( raw );
@@ -1155,4 +1178,144 @@ function value( raw ) {
  */
 function list( raw ) {
 	return Array.isArray( raw ) ? raw : [];
+}
+
+/**
+ * Whether a value is a candidate date range as the API returns them.
+ *
+ * @param {*} raw Value.
+ * @return {boolean} True for a `{ start, end }` object.
+ */
+function isRange( raw ) {
+	return (
+		!! raw &&
+		'object' === typeof raw &&
+		! Array.isArray( raw ) &&
+		( 'start' in raw || 'end' in raw )
+	);
+}
+
+/**
+ * One candidate range as text.
+ *
+ * A range covering a single day reads as that day alone rather than as the same
+ * date twice.
+ *
+ * @param {Object} range Range as the API returns it.
+ * @return {string} Text.
+ */
+function rangeText( range ) {
+	const start = text( range && range.start );
+	const end = text( range && range.end );
+
+	if ( start === end ) {
+		return start;
+	}
+
+	return sprintf(
+		/* translators: 1: range start date, 2: range end date. */
+		__( '%1$s – %2$s', 'marthrown-enquiry-hub' ),
+		start,
+		end
+	);
+}
+
+/**
+ * What one range's position in the list means.
+ *
+ * The order the API returns is the enquirer's own ranking, so the first range is
+ * labelled as the ideal one and the rest as alternatives in preference order.
+ *
+ * @param {number} index Position in the stored list.
+ * @return {string} Label.
+ */
+function rankLabel( index ) {
+	if ( 0 === index ) {
+		return __( 'Ideal', 'marthrown-enquiry-hub' );
+	}
+
+	return sprintf(
+		/* translators: %d: which alternative, counting from one. */
+		__( 'Alternative %d', 'marthrown-enquiry-hub' ),
+		index
+	);
+}
+
+/**
+ * Every day the candidate ranges cover, in preference order.
+ *
+ * The booking a conversion creates is a single day (Requirement 14.2), so the
+ * date control offers days rather than ranges; the ideal range's days come
+ * first, so the default choice is the first day of the range the enquirer would
+ * rather have. Days named by more than one range appear once.
+ *
+ * The total is capped because a dropdown of several hundred dates is not a
+ * control anyone can use, and because a range of any length is a legal thing for
+ * an enquirer to have asked for. A day past the cap is still bookable — the
+ * server's own check is against the ranges, not this list — it just is not
+ * offered here.
+ *
+ * @param {Array} ranges Ranges as the API returns them.
+ * @return {string[]} Days as `YYYY-MM-DD`.
+ */
+function candidateDays( ranges ) {
+	const days = [];
+	const seen = {};
+
+	ranges.forEach( ( range ) => {
+		expandRange( range ).forEach( ( day ) => {
+			if ( ! seen[ day ] && days.length < MAX_BOOKING_DAYS ) {
+				seen[ day ] = true;
+				days.push( day );
+			}
+		} );
+	} );
+
+	return days;
+}
+
+/**
+ * One range as the days it covers, inclusive of both bounds.
+ *
+ * Iterated in UTC so a day is neither skipped nor repeated across a daylight
+ * saving transition. A range whose bounds do not parse, or which ends before it
+ * starts, yields nothing: the store does not hold such a range, and inventing
+ * days for one would offer a booking date nobody named.
+ *
+ * @param {Object} range Range as the API returns it.
+ * @return {string[]} Days as `YYYY-MM-DD`.
+ */
+function expandRange( range ) {
+	const start = parseIsoDate( range && range.start );
+	const end = parseIsoDate( range && range.end );
+
+	if ( ! start || ! end || end < start ) {
+		return [];
+	}
+
+	const days = [];
+	const cursor = new Date( start );
+
+	while ( cursor <= end && days.length <= MAX_BOOKING_DAYS ) {
+		days.push( cursor.toISOString().slice( 0, 10 ) );
+		cursor.setUTCDate( cursor.getUTCDate() + 1 );
+	}
+
+	return days;
+}
+
+/**
+ * A `YYYY-MM-DD` string as a UTC `Date`, or null when it does not parse.
+ *
+ * @param {*} raw Stored bound.
+ * @return {Date|null} Date.
+ */
+function parseIsoDate( raw ) {
+	if ( ! /^\d{4}-\d{2}-\d{2}$/.test( text( raw ) ) ) {
+		return null;
+	}
+
+	const date = new Date( `${ text( raw ) }T00:00:00Z` );
+
+	return Number.isNaN( date.getTime() ) ? null : date;
 }

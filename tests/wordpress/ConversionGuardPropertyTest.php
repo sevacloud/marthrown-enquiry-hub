@@ -373,8 +373,8 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 					'bad_calendar' => self::flag(),
 					'bad_date'     => self::flag(),
 					'status'       => \Eris\Generators::elements( self::statuses() ),
-					'dates'        => Generators::candidate_dates(),
-					'date_index'   => \Eris\Generators::choose( 0, Generators::DATES_MAX - 1 ),
+					'ranges'       => Generators::candidate_ranges(),
+					'date_index'   => \Eris\Generators::choose( 0, 60 ),
 					'known'        => \Eris\Generators::elements( self::KNOWN_CALENDARS ),
 					'stray_offset' => \Eris\Generators::choose( 1, 500 ),
 					'date_shape'   => \Eris\Generators::elements( array( 'outside', 'unparseable' ) ),
@@ -451,7 +451,7 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 	 * @return array{id:int,status:string,status_changed_at:string,booking_id:int|null,calendar_id:int,date:mixed,unavailable:bool,expected_status:int,condition:string}
 	 */
 	private function seed_request( array $scenario ) {
-		$dates      = array_values( (array) $scenario['dates'] );
+		$ranges     = array_values( (array) $scenario['ranges'] );
 		$booking_id = $scenario['linked'] ? (int) $scenario['booking'] : null;
 		$settled    = '2025-06-01 10:00:00';
 
@@ -467,7 +467,7 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 				'status_changed_at' => $settled,
 				'source'            => 'webhook:fixture',
 			),
-			$dates
+			$ranges
 		);
 
 		$this->assertIsInt( $id, 'Seeding an enquiry should succeed.' );
@@ -484,7 +484,7 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 			'status_changed_at' => $settled,
 			'booking_id'        => $booking_id,
 			'calendar_id'       => $this->calendar_for( $scenario ),
-			'date'              => self::date_for( $scenario, $dates ),
+			'date'              => self::date_for( $scenario, Generators::days_in_ranges( $ranges ) ),
 			'unavailable'       => (bool) $scenario['unavailable'],
 			'expected_status'   => $expected['status'],
 			'condition'         => $expected['condition'],
@@ -523,7 +523,7 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 	 * calendar date at all.
 	 *
 	 * @param array $scenario Scenario as generated.
-	 * @param array $dates    The enquiry's candidate dates.
+	 * @param array $dates    Every day the enquiry's candidate ranges cover.
 	 * @return string
 	 */
 	private static function date_for( array $scenario, array $dates ) {
@@ -535,7 +535,7 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 			return (string) $scenario['unparseable'];
 		}
 
-		// Candidate dates sit within 450 days of the generator's base date, so a
+		// Candidate ranges sit within 450 days of the generator's base date, so a
 		// date beyond 1000 days cannot be one of them whatever was drawn.
 		$outside = Generators::date_at( 1000 + (int) $scenario['stray_days'] );
 

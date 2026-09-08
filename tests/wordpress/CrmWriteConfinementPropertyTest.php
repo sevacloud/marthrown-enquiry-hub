@@ -422,7 +422,7 @@ class CrmWriteConfinementPropertyTest extends WP_UnitTestCase {
 				'message'      => $edit['message'],
 				'total_guests' => $edit['total_guests'],
 			),
-			$edit['selected_dates'],
+			$edit['date_ranges'],
 			array(
 				'event_type'       => $edit['event_type'],
 				'site_exclusivity' => $edit['site_exclusivity'],
@@ -649,7 +649,8 @@ class CrmWriteConfinementPropertyTest extends WP_UnitTestCase {
 	/**
 	 * Every workflow value that must appear nowhere in FluentCRM.
 	 *
-	 * The six status names, plus every candidate date the enquiry ever holds.
+	 * The six status names, plus every bound of every candidate range the enquiry
+	 * ever holds.
 	 * Messages, term values and note bodies are covered by the sentinel prefix
 	 * instead, which catches a fragment as readily as a whole value.
 	 *
@@ -659,12 +660,9 @@ class CrmWriteConfinementPropertyTest extends WP_UnitTestCase {
 	private static function forbidden( array $scenario ) {
 		$values = Lifecycle::STATUSES;
 
-		foreach ( $scenario['fields']['selected_dates'] as $date ) {
-			$values[] = (string) $date;
-		}
-
-		foreach ( $scenario['workflow_edit']['selected_dates'] as $date ) {
-			$values[] = (string) $date;
+		foreach ( array_merge( $scenario['fields']['date_ranges'], $scenario['workflow_edit']['date_ranges'] ) as $range ) {
+			$values[] = (string) $range['start'];
+			$values[] = (string) $range['end'];
 		}
 
 		return array_values( array_unique( $values ) );
@@ -741,19 +739,19 @@ class CrmWriteConfinementPropertyTest extends WP_UnitTestCase {
 	 * @return array
 	 */
 	private static function decode( array $drawn ) {
-		$dates      = self::decode_dates( $drawn['dates'] );
-		$edit_dates = self::decode_dates( $drawn['edit'] );
+		$ranges      = self::decode_ranges( $drawn['dates'] );
+		$edit_ranges = self::decode_ranges( $drawn['edit'] );
 
 		$scenario = array(
 			'fields'        => array_merge(
 				self::decode_contact( $drawn['contact'] ),
 				self::decode_workflow( $drawn['workflow'] ),
-				array( 'selected_dates' => $dates )
+				array( 'date_ranges' => $ranges )
 			),
 			'contact_edit'  => self::decode_contact( $drawn['edit'] ),
 			'workflow_edit' => array_merge(
 				self::decode_workflow( $drawn['edit'] ),
-				array( 'selected_dates' => $edit_dates )
+				array( 'date_ranges' => $edit_ranges )
 			),
 			'list_id'       => (int) $drawn['list_id'],
 			'tag_id'        => (int) $drawn['tag_id'],
@@ -827,19 +825,27 @@ class CrmWriteConfinementPropertyTest extends WP_UnitTestCase {
 	 * @param int $seed Drawn seed.
 	 * @return string[]
 	 */
-	private static function decode_dates( $seed ) {
+	private static function decode_ranges( $seed ) {
 		$pick   = self::picker( $seed );
-		$count  = 1 + $pick( 4 );
+		$count  = 1 + $pick( Generators::RANGES_MAX );
 		$offset = 0;
-		$dates  = array();
+		$ranges = array();
 
 		for ( $index = 0; $index < $count; $index++ ) {
-			// A strictly positive step keeps every date distinct.
+			// A strictly positive step, and the span added on afterwards, keep
+			// every range distinct and clear of the one before it.
 			$offset += 1 + $pick( 45 );
-			$dates[] = Generators::date_at( $offset );
+			$span    = $pick( 5 );
+
+			$ranges[] = array(
+				'start' => Generators::date_at( $offset ),
+				'end'   => Generators::date_at( $offset + $span ),
+			);
+
+			$offset += $span;
 		}
 
-		return $dates;
+		return $ranges;
 	}
 
 	/**

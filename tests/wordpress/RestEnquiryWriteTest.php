@@ -355,7 +355,7 @@ class RestEnquiryWriteTest extends WP_UnitTestCase {
 			$this->assertSame( $before[ $field ], $copy[ $field ], $field . ' is copied.' );
 		}
 
-		$this->assertSame( $before['selected_dates'], $copy['selected_dates'] );
+		$this->assertSame( $before['date_ranges'], $copy['date_ranges'] );
 		$this->assertSame( $before['event_type'], $copy['event_type'] );
 		$this->assertSame( $before['site_exclusivity'], $copy['site_exclusivity'] );
 

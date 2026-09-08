@@ -30,7 +30,7 @@
  * 5. **Writes the one rejection row** on every outcome other than a created
  *    enquiry (Requirements 4.1, 5.8).
  *
- * The guards read `email` and `selected_dates` out of a `FieldMapper` resolution
+ * The guards read `email` and `date_ranges` out of a `FieldMapper` resolution
  * of the payload, because both run before anything else has looked at a value.
  * `EnquiryCreator` resolves the raw map again for itself, which is why the raw
  * payload rather than the resolved fields is what gets passed on: the snapshot
@@ -132,7 +132,7 @@ class IntakeHandler {
 		}
 
 		// Requirements 4.2, 4.3.
-		$duplicate_of = DuplicateDetector::find_duplicate( $email, self::dates( $submitted ) );
+		$duplicate_of = DuplicateDetector::find_duplicate( $email, self::ranges( $submitted ) );
 
 		if ( $duplicate_of > 0 ) {
 			return self::reject(
@@ -238,23 +238,32 @@ class IntakeHandler {
 	}
 
 	/**
-	 * The submitted candidate dates as a list, for the duplicate check.
+	 * The submitted candidate date ranges as a list, for the duplicate check.
 	 *
-	 * Normalisation to `Y-m-d` and the set comparison belong to
-	 * `DuplicateDetector`; this only guarantees it a list to work on, because a
-	 * sender may deliver a single date as a bare scalar.
+	 * Normalisation and the set comparison belong to `DuplicateDetector`; this
+	 * only guarantees it a list to work on. A lone range arrives as an array with
+	 * `start` and `end` keys, which is a single entry rather than a list of two,
+	 * so it is wrapped instead of re-indexed.
 	 *
 	 * @param array $submitted Resolved enquiry fields.
 	 * @return array<int,mixed>
 	 */
-	protected static function dates( array $submitted ) {
-		if ( ! isset( $submitted['selected_dates'] ) ) {
+	protected static function ranges( array $submitted ) {
+		if ( ! isset( $submitted['date_ranges'] ) ) {
 			return array();
 		}
 
-		$dates = $submitted['selected_dates'];
+		$ranges = $submitted['date_ranges'];
 
-		return is_array( $dates ) ? array_values( $dates ) : array( $dates );
+		if ( ! is_array( $ranges ) ) {
+			return array( $ranges );
+		}
+
+		if ( array_key_exists( 'start', $ranges ) || array_key_exists( 'end', $ranges ) ) {
+			return array( $ranges );
+		}
+
+		return array_values( $ranges );
 	}
 
 	/**

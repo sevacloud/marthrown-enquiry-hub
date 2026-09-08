@@ -52,7 +52,7 @@ class FieldMapper {
 		'email',
 		'phone',
 		'total_guests',
-		'selected_dates',
+		'date_ranges',
 		'event_type',
 		'site_exclusivity',
 		'message',

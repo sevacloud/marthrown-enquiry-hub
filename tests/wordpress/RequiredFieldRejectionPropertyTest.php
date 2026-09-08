@@ -9,7 +9,7 @@
  * of that subset with the applied profile's required set, and no other field.
  * Under the Webhook profile the required set is all nine fields; under the
  * Manual profile it is exactly `first_name`, `last_name`, `email` and
- * `selected_dates`, so an empty `phone`, `total_guests`, `message`,
+ * `date_ranges`, so an empty `phone`, `total_guests`, `message`,
  * `event_type` or `site_exclusivity` is named by nothing. For any required
  * field of the applied profile, the absence of that field's key fails in full
  * mode (creation, either route) and does not fail in partial mode (an edit),
@@ -51,7 +51,11 @@
  *   is drawn absent, as `''`, as an empty list or as a list holding nothing but
  *   blanks. The four styles are not interchangeable: absence is the one the two
  *   modes disagree about, and a blank-filled list is the one a form padding a
- *   multi-select actually sends.
+ *   multi-select actually sends. For `date_ranges` the blank-filled list holds a
+ *   range object whose two bounds are blank rather than blank strings, because the
+ *   manual and edit routes declare that field as a list of objects: a list of
+ *   bare strings would be refused by core's own schema check before the Validator
+ *   saw it, which is a different refusal from the one this property is about.
  * - **The subset may be empty, and that case is the acceptance half of the
  *   property.** An empty intersection has to mean no presence failure, so those
  *   iterations assert the submission was accepted — which under the Manual
@@ -138,7 +142,7 @@ class RequiredFieldRejectionPropertyTest extends WP_UnitTestCase {
 		'email',
 		'phone',
 		'total_guests',
-		'selected_dates',
+		'date_ranges',
 		'event_type',
 		'site_exclusivity',
 		'message',
@@ -156,14 +160,14 @@ class RequiredFieldRejectionPropertyTest extends WP_UnitTestCase {
 	 *
 	 * @var string[]
 	 */
-	const MANUAL_REQUIRED = array( 'first_name', 'last_name', 'email', 'selected_dates' );
+	const MANUAL_REQUIRED = array( 'first_name', 'last_name', 'email', 'date_ranges' );
 
 	/**
 	 * The three fields a submission carries as a set of values.
 	 *
 	 * @var string[]
 	 */
-	const COLLECTION_FIELDS = array( 'selected_dates', 'event_type', 'site_exclusivity' );
+	const COLLECTION_FIELDS = array( 'date_ranges', 'event_type', 'site_exclusivity' );
 
 	/**
 	 * The three write paths, and therefore the three profile/mode pairings.
@@ -604,7 +608,7 @@ class RequiredFieldRejectionPropertyTest extends WP_UnitTestCase {
 	 * payload snapshot and a reason for each failing field (Requirement 3.8).
 	 *
 	 * The snapshot is what the endpoint handed the handler, so a multi-value
-	 * field arrives as a list however the sender delivered it: a `selected_dates`
+	 * field arrives as a list however the sender delivered it: an `event_type`
 	 * posted as `''` is snapshotted as an empty list. So a field the case made
 	 * empty is asserted to be empty in the snapshot, and every other field to be
 	 * carried verbatim, rather than the test restating the endpoint's own
@@ -891,19 +895,25 @@ class RequiredFieldRejectionPropertyTest extends WP_UnitTestCase {
 				continue;
 			}
 
-			$submitted[ $field ] = self::empty_value( $styles[ $field ] );
+			$submitted[ $field ] = self::empty_value( $styles[ $field ], $field );
 		}
 
 		return $submitted;
 	}
 
 	/**
-	 * One empty value of a given style.
+	 * One empty value of a given style, in the shape the named field carries.
+	 *
+	 * `date_ranges` takes a range object with two blank bounds where the other
+	 * collections take blank strings: the manual and edit routes declare it as a
+	 * list of objects, so a blank string there is turned away by core's schema
+	 * check rather than reaching the Validator.
 	 *
 	 * @param string $style One of the STYLE_ constants.
+	 * @param string $field Enquiry field the value is for.
 	 * @return mixed
 	 */
-	private static function empty_value( $style ) {
+	private static function empty_value( $style, $field ) {
 		if ( self::STYLE_WHITESPACE === $style ) {
 			return "  \t ";
 		}
@@ -913,6 +923,15 @@ class RequiredFieldRejectionPropertyTest extends WP_UnitTestCase {
 		}
 
 		if ( self::STYLE_BLANK_COLLECTION === $style ) {
+			if ( 'date_ranges' === $field ) {
+				return array(
+					array(
+						'start' => '   ',
+						'end'   => '',
+					),
+				);
+			}
+
 			return array( '   ', '' );
 		}
 

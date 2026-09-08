@@ -319,7 +319,7 @@ function renderEnquiryCell( row, column, setSelectedId ) {
 			);
 
 		case 'dates':
-			return dateList( row.selected_dates );
+			return rangeList( row.date_ranges );
 
 		case 'status':
 			return (
@@ -354,13 +354,31 @@ function fullName( row ) {
 }
 
 /**
- * The candidate dates of one row, comma-separated.
+ * The candidate date ranges of one row, comma-separated, ideal range first.
  *
- * @param {*} dates Candidate dates as the store hydrated them.
+ * Rank order is the order the store returns, so the range the enquirer would
+ * rather have leads the cell. A range covering one day is shown as that day
+ * alone rather than as the same date twice.
+ *
+ * @param {*} ranges Candidate ranges as the store hydrated them.
  * @return {string} Display text.
  */
-function dateList( dates ) {
-	return Array.isArray( dates ) && dates.length ? dates.join( ', ' ) : '—';
+function rangeList( ranges ) {
+	if ( ! Array.isArray( ranges ) || 0 === ranges.length ) {
+		return '—';
+	}
+
+	const cells = ranges
+		.filter( ( range ) => range && 'object' === typeof range )
+		.map( ( range ) => {
+			const start = range.start ? String( range.start ) : '';
+			const end = range.end ? String( range.end ) : '';
+
+			return start === end ? start : `${ start } – ${ end }`;
+		} )
+		.filter( ( cell ) => '' !== cell );
+
+	return cells.length ? cells.join( ', ' ) : '—';
 }
 
 /**

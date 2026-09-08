@@ -158,7 +158,7 @@ class ReRaisePropertyTest extends WP_UnitTestCase {
 	 *
 	 * @var string[]
 	 */
-	const COPIED_SETS = array( 'selected_dates', 'event_type', 'site_exclusivity' );
+	const COPIED_SETS = array( 'event_type', 'site_exclusivity' );
 
 	/**
 	 * Tables that must hold no row from a failed re-raise.
@@ -211,8 +211,8 @@ class ReRaisePropertyTest extends WP_UnitTestCase {
 	 */
 	const BROKEN_STATEMENT = 'INSERT INTO meh_no_such_table ( id ) VALUES ( 1 )';
 
-	/** Most candidate dates one generated source holds. */
-	const DATES_MAX = 4;
+	/** Most candidate date ranges one generated source holds. */
+	const RANGES_MAX = 3;
 
 	/** Most notes and history entries one generated source holds. */
 	const ENTRIES_MAX = 2;
@@ -452,6 +452,14 @@ class ReRaisePropertyTest extends WP_UnitTestCase {
 			);
 		}
 
+		// The ranked list, copied rank and all: a re-raise that reordered the
+		// enquirer's preferences would be inventing an answer they never gave.
+		$this->assertSame(
+			$before['date_ranges'],
+			$copy['date_ranges'],
+			'date_ranges is copied as a list, in the source order. ' . $label
+		);
+
 		// Requirement 9.5: the copy starts its own lifecycle, carries no booking,
 		// and is created now.
 		$this->assertSame( 'new', $copy['status'], 'The copy starts at new. ' . $label );
@@ -575,7 +583,7 @@ class ReRaisePropertyTest extends WP_UnitTestCase {
 					'phone'            => Generators::phone_or_empty(),
 					'total_guests'     => Generators::total_guests_or_unsupplied(),
 					'message'          => Generators::message_or_empty(),
-					'dates'            => Generators::candidate_dates( 1, self::DATES_MAX ),
+					'ranges'           => Generators::candidate_ranges( 1, self::RANGES_MAX ),
 					'event_type'       => Generators::term_set( 0, 3 ),
 					'site_exclusivity' => Generators::term_set( 0, 2 ),
 					'subscriber'       => \Eris\Generators::elements( array( 0, self::SOURCE_SUBSCRIBER ) ),
@@ -602,7 +610,7 @@ class ReRaisePropertyTest extends WP_UnitTestCase {
 	protected static function failure_scenario() {
 		return self::scenario(
 			array(
-				'dates'            => Generators::candidate_dates( 1, 3 ),
+				'ranges'           => Generators::candidate_ranges( 1, 3 ),
 				'event_type'       => Generators::term_set( 1, 2 ),
 				'site_exclusivity' => Generators::term_set( 1, 2 ),
 				'cause'            => \Eris\Generators::elements( self::INJECTED ),
@@ -775,7 +783,7 @@ class ReRaisePropertyTest extends WP_UnitTestCase {
 				'source'                  => self::SOURCE,
 				'is_test'                 => $case['is_test'] ? 1 : 0,
 			),
-			(array) $case['dates'],
+			(array) $case['ranges'],
 			array(
 				'event_type'       => (array) $case['event_type'],
 				'site_exclusivity' => (array) $case['site_exclusivity'],
@@ -826,7 +834,7 @@ class ReRaisePropertyTest extends WP_UnitTestCase {
 				'status'     => $case['status'],
 				'subscriber' => (int) $case['subscriber'],
 				'booking'    => (int) $case['booking'],
-				'dates'      => count( (array) $case['dates'] ),
+				'ranges'     => count( (array) $case['ranges'] ),
 				'terms'      => count( (array) $case['event_type'] ) + count( (array) $case['site_exclusivity'] ),
 				'notes'      => (int) $case['notes'],
 				'entries'    => (int) $case['entries'],

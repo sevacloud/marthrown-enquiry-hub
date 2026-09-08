@@ -645,11 +645,17 @@ class RestEnquiries {
 				'type'              => array( 'integer', 'string' ),
 				'sanitize_callback' => 'sanitize_text_field',
 			),
-			'selected_dates'   => array(
-				'description'       => 'Candidate dates, one to ten of them.',
+			'date_ranges'      => array(
+				'description'       => 'Candidate date ranges, the ideal one first, up to three of them.',
 				'type'              => 'array',
-				'items'             => array( 'type' => 'string' ),
-				'sanitize_callback' => array( __CLASS__, 'sanitize_text_list' ),
+				'items'             => array(
+					'type'       => 'object',
+					'properties' => array(
+						'start' => array( 'type' => 'string' ),
+						'end'   => array( 'type' => 'string' ),
+					),
+				),
+				'sanitize_callback' => array( __CLASS__, 'sanitize_range_list' ),
 			),
 			'event_type'       => array(
 				'description'       => 'Event types. Optional.',
@@ -1736,8 +1742,7 @@ class RestEnquiries {
 	 * padding a multi-select with blanks has not submitted those values. A field
 	 * submitted holding nothing but blanks therefore arrives as an empty list,
 	 * which is a cleared set for `event_type` and `site_exclusivity`
-	 * (Requirement 18.5) and a presence failure for `selected_dates`
-	 * (Requirement 18.3) — the Validator decides which, not this method.
+	 * (Requirement 18.5) — the Validator decides that, not this method.
 	 *
 	 * @param mixed $value Submitted value.
 	 * @return string[]
@@ -1761,6 +1766,81 @@ class RestEnquiries {
 		}
 
 		return $list;
+	}
+
+	/**
+	 * Sanitise a submitted candidate date list to a list of `start`/`end` pairs.
+	 *
+	 * Three submitted shapes are accepted, because three clients send them: a
+	 * list of `{ start, end }` objects from the hub's own form, a single such
+	 * object where only the ideal range was named, and a bare date string, which
+	 * is a range of one day. Nothing here rejects a malformed range or clips a
+	 * fourth one — an entry keeps whatever bounds it was given, empty ones
+	 * included, so the Validator is the single place that reports
+	 * `incomplete_range`, `unparseable_date`, `ends_before_start` and
+	 * `too_many_ranges` (Requirement 18.3).
+	 *
+	 * @param mixed $value Submitted value.
+	 * @return array<int,array{start:string,end:string}>
+	 */
+	public static function sanitize_range_list( $value ) {
+		// A lone range object would otherwise be read as two entries, one per
+		// bound, and both of them half-drawn.
+		if ( is_array( $value ) && ( isset( $value['start'] ) || isset( $value['end'] ) ) ) {
+			$value = array( $value );
+		}
+
+		$items  = is_array( $value ) ? $value : array( $value );
+		$ranges = array();
+
+		foreach ( $items as $item ) {
+			if ( is_scalar( $item ) ) {
+				$day = self::sanitize_date_text( $item );
+
+				if ( '' !== $day ) {
+					$ranges[] = array(
+						'start' => $day,
+						'end'   => $day,
+					);
+				}
+
+				continue;
+			}
+
+			if ( ! is_array( $item ) ) {
+				continue;
+			}
+
+			$start = isset( $item['start'] ) ? self::sanitize_date_text( $item['start'] ) : '';
+			$end   = isset( $item['end'] ) ? self::sanitize_date_text( $item['end'] ) : '';
+
+			if ( '' === $start && '' === $end ) {
+				continue;
+			}
+
+			$ranges[] = array(
+				'start' => $start,
+				'end'   => $end,
+			);
+		}
+
+		return $ranges;
+	}
+
+	/**
+	 * Sanitise one submitted date bound to text.
+	 *
+	 * @param mixed $value Submitted bound.
+	 * @return string Empty when the value is not text at all.
+	 */
+	protected static function sanitize_date_text( $value ) {
+		if ( ! is_scalar( $value ) ) {
+			return '';
+		}
+
+		return function_exists( 'sanitize_text_field' )
+			? sanitize_text_field( (string) $value )
+			: trim( strip_tags( (string) $value ) ); // phpcs:ignore WordPress.WP.AlternativeFunctions
 	}
 
 	/**
@@ -1851,7 +1931,7 @@ class RestEnquiries {
 	 * One hydrated enquiry as the single-enquiry route represents it.
 	 *
 	 * Everything the detail panel needs in one response (Requirement 13.2): the
-	 * stored fields, the candidate dates and both multi-selects as the store
+	 * stored fields, the candidate date ranges and both multi-selects as the store
 	 * hydrated them, the payload snapshot — kept here, unlike in the list, because
 	 * this is where a questionable intake is traced — the notes, the history, the
 	 * `crm_sync_state` in whichever state it holds (Requirement 5.3), the linked

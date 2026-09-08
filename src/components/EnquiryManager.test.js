@@ -52,7 +52,7 @@ const LIST = {
 			last_name: 'Lovelace',
 			email: 'ada@example.com',
 			phone: '',
-			selected_dates: [ '2026-05-01' ],
+			date_ranges: [ { start: '2026-05-01', end: '2026-05-03' } ],
 			status: 'new',
 			is_test: false,
 			created_at: '2026-01-02 09:00:00',
@@ -63,7 +63,7 @@ const LIST = {
 			last_name: 'Rig',
 			email: 'rig@example.com',
 			phone: '',
-			selected_dates: [],
+			date_ranges: [],
 			status: 'quoted',
 			is_test: true,
 			created_at: '2026-01-03 09:00:00',
@@ -132,6 +132,19 @@ describe( 'EnquiryManager', () => {
 		);
 	} );
 
+	it( 'shows a candidate range as a range and an empty set as a dash', async () => {
+		await renderList();
+
+		expect( screen.getByText( '2026-05-01 – 2026-05-03' ) ).toBeTruthy();
+
+		// The second row holds no ranges at all.
+		const cells = [ ...document.querySelectorAll( 'tbody tr' ) ].map(
+			( row ) => row.cells[ 2 ].textContent
+		);
+
+		expect( cells[ 1 ] ).toBe( '—' );
+	} );
+
 	it( 'opens with the hide-test toggle off, so staging rows are listed', async () => {
 		await renderList();
 
@@ -161,10 +174,15 @@ describe( 'EnquiryManager', () => {
 			'Event type',
 			'Site exclusivity',
 			'Message',
-			'Start date',
-			'End date',
 		].forEach( ( label ) => {
 			expect( screen.getByLabelText( label ).value ).toBe( '' );
+		} );
+
+		// The three ranked range slots, all six bounds empty.
+		[ 'Start date', 'End date' ].forEach( ( label ) => {
+			expect(
+				screen.getAllByLabelText( label ).map( ( f ) => f.value )
+			).toEqual( [ '', '', '' ] );
 		} );
 	} );
 
@@ -184,7 +202,7 @@ describe( 'EnquiryManager', () => {
 		fireEvent.change( screen.getByLabelText( 'Email' ), {
 			target: { value: 'grace@example.com' },
 		} );
-		fireEvent.change( screen.getByLabelText( 'Start date' ), {
+		fireEvent.change( screen.getAllByLabelText( 'Start date' )[ 0 ], {
 			target: { value: '2026-06-01' },
 		} );
 
@@ -200,7 +218,7 @@ describe( 'EnquiryManager', () => {
 			first_name: 'Grace',
 			last_name: 'Hopper',
 			email: 'grace@example.com',
-			selected_dates: [ '2026-06-01' ],
+			date_ranges: [ { start: '2026-06-01', end: '2026-06-01' } ],
 		} );
 	} );
 } );

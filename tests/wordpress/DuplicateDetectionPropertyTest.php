@@ -6,8 +6,8 @@
  * Feature: enquiry-data-layer, Property 14: For any existing enquiry, any second
  * submission arriving as an intake webhook request, any duplicate window value,
  * and any elapsed time between them, the submission is reported as a duplicate
- * exactly when its email equals the existing enquiry's email, its candidate
- * dates equal the existing enquiry's candidate dates as a set, and the elapsed
+ * exactly when its email equals the existing enquiry's email, its candidate date
+ * ranges equal the existing enquiry's candidate ranges as a set, and the elapsed
  * time is less than the window; when reported, no enquiry is created and one
  * rejected intake attempt with reason `duplicate` referencing the existing
  * enquiry identifier is recorded; otherwise a new enquiry is created.
@@ -19,25 +19,27 @@
  * - **The claim is a three-way conjunction, so the generator quantifies over
  *   each conjunct independently.** The submitted email is the same address, the
  *   same address surrounded by whitespace, or a different address; the submitted
- *   date set is equal to the stored one (as written, rotated, or with a repeat),
- *   or unequal (a subset, a superset, one date swapped, or disjoint); the window
+ *   range set is equal to the stored one (as written, rotated, or with a repeat),
+ *   or unequal (a subset, a superset, one range swapped, one range's end day moved
+ *   while its start stays put, or disjoint); the window
  *   is the unfiltered default of 900 seconds, a filtered value, or 0; and the
  *   elapsed time sits at 0, one second inside the window, exactly on it, one
  *   second past it, or anywhere in twice its span. The oracle is the conjunction
  *   itself, written out independently of the SQL under test, so a `HAVING` clause
  *   that accidentally matched a subset would fail rather than agree with itself.
  * - **It runs against real tables.** Set equality is decided by a `GROUP BY` and
- *   two `COUNT( DISTINCT … )` terms inside one statement; no amount of
- *   PHP-level inspection would show whether that statement admits a superset.
- * - **Every iteration seeds decoys.** An enquiry holding the same dates under
- *   another address, one holding the same address over disjoint dates, and one
+ *   two `COUNT( DISTINCT … )` terms over a key built from both bounds inside one
+ *   statement; no amount of PHP-level inspection would show whether that statement
+ *   admits a superset, or whether it keys on the start day alone.
+ * - **Every iteration seeds decoys.** An enquiry holding the same ranges under
+ *   another address, one holding the same address over disjoint ranges, and one
  *   holding both but created long outside the window. Each is a row the
  *   statement must not return, and without them a detector matching on email
  *   alone — or on nothing but recency — would still pass.
  * - **The identifier matters, not just the verdict** (Requirement 4.3). The
  *   rejection row references the existing enquiry, so the property asserts
  *   *which* identifier comes back, and half the iterations seed an older twin
- *   holding the same address and the same dates so that "the most recent match"
+ *   holding the same address and the same ranges so that "the most recent match"
  *   is a claim under test rather than an accident of there being one match.
  * - **The `otherwise` half is asserted where it can be.** `DuplicateDetector`
  *   creates nothing and rejects nothing — it answers a question — so this test
@@ -107,21 +109,23 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 	const EMAIL_RELATIONS = array( 'same', 'padded', 'different' );
 
 	/**
-	 * How the submitted date set relates to the stored one.
+	 * How the submitted range set relates to the stored one.
 	 *
-	 * The first three are set-equal and the last four are not, which is the whole
-	 * of what Requirement 4.2 turns on.
+	 * The first three are set-equal and the last five are not, which is the whole
+	 * of what Requirement 4.2 turns on. `end_shifted` is the relation ranges add
+	 * over bare dates: the same first day, a different last one, which is a
+	 * different enquiry about different days however alike the two look.
 	 *
 	 * @var string[]
 	 */
-	const DATE_RELATIONS = array( 'same', 'rotated', 'repeated', 'subset', 'superset', 'swapped', 'disjoint' );
+	const RANGE_RELATIONS = array( 'same', 'rotated', 'repeated', 'subset', 'superset', 'swapped', 'end_shifted', 'disjoint' );
 
 	/**
-	 * Date relations that are set-equal to the stored date set.
+	 * Range relations that are set-equal to the stored range set.
 	 *
 	 * @var string[]
 	 */
-	const EQUAL_DATE_RELATIONS = array( 'same', 'rotated', 'repeated' );
+	const EQUAL_RANGE_RELATIONS = array( 'same', 'rotated', 'repeated' );
 
 	/**
 	 * Where the stored enquiry's creation time sits relative to the window.
@@ -131,21 +135,21 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 	const ELAPSED_RELATIONS = array( 'now', 'just_inside', 'on_the_boundary', 'just_outside', 'well_outside', 'anywhere' );
 
 	/**
-	 * Most candidate dates an enquiry may hold (Requirement 1.2).
+	 * Most candidate date ranges an enquiry may hold (Requirement 1.2).
 	 */
-	const DATES_MAX = 10;
+	const RANGES_MAX = 3;
 
 	/**
-	 * Day offset of the dates a submission adds or swaps in, comfortably beyond
-	 * the widest span the candidate date generator can produce.
+	 * Day offset of the ranges a submission adds or swaps in, comfortably beyond
+	 * the widest span the candidate range generator can produce.
 	 */
 	const SUBMITTED_OFFSET = 900;
 
 	/**
-	 * Day offset of the decoy enquiry's dates.
+	 * Day offset of the decoy enquiry's ranges.
 	 *
-	 * A family of its own, so the decoy holding the same address over other dates
-	 * can never coincide with the date set a `disjoint` submission carries — which
+	 * A family of its own, so the decoy holding the same address over other ranges
+	 * can never coincide with the range set a `disjoint` submission carries — which
 	 * would make that submission a genuine duplicate of the decoy and turn the
 	 * oracle into a lie.
 	 */
@@ -207,13 +211,13 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 
 	/**
 	 * Feature: enquiry-data-layer, Property 14: Duplicate detection is exactly
-	 * email plus date set within the window.
+	 * email plus range set within the window.
 	 *
 	 * **Validates: Requirements 4.2, 4.3, 4.4, 4.5**
 	 *
 	 * @eris-shrink 10
 	 */
-	public function test_duplicate_detection_is_email_plus_date_set_within_the_window() {
+	public function test_duplicate_detection_is_email_plus_range_set_within_the_window() {
 		$this->limitTo( Iterations::count( 70 ) )
 			->forAll( self::scenario() )
 			->then(
@@ -221,31 +225,31 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 					$this->clear();
 
 					$window = $this->apply_window( $case['window'] );
-					$stored = self::normalise( $case['dates'] );
+					$stored = self::normalise( $case['ranges'] );
 
-					$submitted_email = self::submitted_email( (string) $case['email'], $case['email_relation'] );
-					$submitted_dates = self::submitted_dates( $case['dates'], $case['date_relation'], (int) $case['rotation'] );
+					$submitted_email  = self::submitted_email( (string) $case['email'], $case['email_relation'] );
+					$submitted_ranges = self::submitted_ranges( $case['ranges'], $case['range_relation'], (int) $case['rotation'] );
 
 					$elapsed = self::elapsed( $window, $case['elapsed_relation'], (int) $case['jitter'] );
 
-					$target = $this->seed( (string) $case['email'], $case['dates'], $elapsed );
-					$this->seed_decoys( (string) $case['email'], $case['dates'], $window );
+					$target = $this->seed( (string) $case['email'], $case['ranges'], $elapsed );
+					$this->seed_decoys( (string) $case['email'], $case['ranges'], $window );
 
 					if ( $case['twin_gap'] > 0 ) {
 						// An older enquiry holding the same identity, so "the most
 						// recent match" is a claim rather than a coincidence.
-						$this->seed( (string) $case['email'], $case['dates'], $elapsed + (int) $case['twin_gap'] );
+						$this->seed( (string) $case['email'], $case['ranges'], $elapsed + (int) $case['twin_gap'] );
 					}
 
 					$expected = self::equal_emails( (string) $case['email'], $submitted_email )
-						&& self::normalise( $submitted_dates ) === $stored
+						&& self::normalise( $submitted_ranges ) === $stored
 						&& $window > 0
 						&& $elapsed < $window;
 
 					$label = self::label( $case, $window, $elapsed );
 
 					$before = $this->row_counts();
-					$found  = DuplicateDetector::find_duplicate( $submitted_email, $submitted_dates );
+					$found  = DuplicateDetector::find_duplicate( $submitted_email, $submitted_ranges );
 
 					// Asking the question stores nothing: the rejection row is the
 					// handler's to write, on the handler's terms.
@@ -263,7 +267,7 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 
 					$this->assertSame( 0, $found, 'The submission should not be a duplicate. ' . $label );
 
-					$this->assert_storable_as_a_new_enquiry( $submitted_email, $submitted_dates, $window, $label );
+					$this->assert_storable_as_a_new_enquiry( $submitted_email, $submitted_ranges, $window, $label );
 				}
 			);
 	}
@@ -282,13 +286,13 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 		return \Eris\Generators::associative(
 			array(
 				'email'            => Generators::email(),
-				'dates'            => Generators::candidate_dates(),
+				'ranges'           => Generators::candidate_ranges( 1, self::RANGES_MAX ),
 				'email_relation'   => \Eris\Generators::elements( self::EMAIL_RELATIONS ),
-				'date_relation'    => \Eris\Generators::elements( self::DATE_RELATIONS ),
+				'range_relation'   => \Eris\Generators::elements( self::RANGE_RELATIONS ),
 				'window'           => \Eris\Generators::elements( self::WINDOWS ),
 				'elapsed_relation' => \Eris\Generators::elements( self::ELAPSED_RELATIONS ),
 				'jitter'           => \Eris\Generators::choose( 0, 7200 ),
-				'rotation'         => \Eris\Generators::choose( 0, self::DATES_MAX ),
+				'rotation'         => \Eris\Generators::choose( 0, self::RANGES_MAX ),
 				// Zero means "no twin", so half the iterations have a single match.
 				'twin_gap'         => \Eris\Generators::choose( 0, 600 ),
 			)
@@ -345,40 +349,54 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The candidate date set the submission carries.
+	 * The candidate range set the submission carries.
 	 *
-	 * @param array  $dates    Stored candidate dates, ascending and distinct.
-	 * @param string $relation One of self::DATE_RELATIONS.
+	 * @param array  $ranges   Stored candidate ranges, in rank order and distinct.
+	 * @param string $relation One of self::RANGE_RELATIONS.
 	 * @param int    $rotation How far to rotate, for the `rotated` relation.
 	 * @return array
 	 */
-	private static function submitted_dates( array $dates, $relation, $rotation ) {
+	private static function submitted_ranges( array $ranges, $relation, $rotation ) {
 		switch ( $relation ) {
 			case 'rotated':
-				$offset = count( $dates ) > 0 ? (int) $rotation % count( $dates ) : 0;
+				$offset = count( $ranges ) > 0 ? (int) $rotation % count( $ranges ) : 0;
 
-				return array_merge( array_slice( $dates, $offset ), array_slice( $dates, 0, $offset ) );
+				return array_merge( array_slice( $ranges, $offset ), array_slice( $ranges, 0, $offset ) );
 
 			case 'repeated':
-				// Two identical candidate dates are one candidate date.
-				return array_merge( $dates, array( $dates[0], end( $dates ) ) );
+				// Two identical candidate ranges are one candidate range.
+				return array_merge( $ranges, array( $ranges[0], end( $ranges ) ) );
 
 			case 'subset':
-				// One date short, and the empty set when the stored enquiry holds
-				// a single date — both unequal to the stored set.
-				return array_slice( $dates, 1 );
+				// One range short, and the empty set when the stored enquiry holds
+				// a single range — both unequal to the stored set.
+				return array_slice( $ranges, 1 );
 
 			case 'superset':
-				return array_merge( $dates, array( self::date_at( self::SUBMITTED_OFFSET, 1 ) ) );
+				return array_merge( $ranges, array( self::range_at( self::SUBMITTED_OFFSET, 1 ) ) );
 
 			case 'swapped':
-				return array_merge( array_slice( $dates, 1 ), array( self::date_at( self::SUBMITTED_OFFSET, 1 ) ) );
+				return array_merge( array_slice( $ranges, 1 ), array( self::range_at( self::SUBMITTED_OFFSET, 1 ) ) );
+
+			case 'end_shifted':
+				// The last range's first day kept, and a last day well beyond it: a
+				// submission a detector keying on the start alone would wrongly call
+				// a duplicate.
+				$shifted = $ranges;
+				$last    = count( $shifted ) - 1;
+
+				$shifted[ $last ] = array(
+					'start' => $shifted[ $last ]['start'],
+					'end'   => self::date_at( self::SUBMITTED_OFFSET, 1 ),
+				);
+
+				return $shifted;
 
 			case 'disjoint':
-				return self::dates_at( self::SUBMITTED_OFFSET, count( $dates ) );
+				return self::ranges_at( self::SUBMITTED_OFFSET, count( $ranges ) );
 
 			default:
-				return $dates;
+				return $ranges;
 		}
 	}
 
@@ -433,33 +451,34 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 	 * (Requirement 4.5).
 	 *
 	 * Skipped where a resubmission could not be a duplicate whatever the
-	 * detector did: with detection off, or with no readable candidate date to
+	 * detector did: with detection off, or with no readable candidate range to
 	 * form a set from. Skipped too where the submission carries more candidate
-	 * dates than an enquiry may hold, since storing it would be a fixture outside
-	 * Requirement 1.2's range rather than a test of anything.
+	 * ranges than an enquiry may hold, since storing it would be a fixture outside
+	 * Requirement 1.2's range rather than a test of anything — which is what the
+	 * `superset` relation on an already-full stored set produces.
 	 *
 	 * @param string $email  Submitted address.
-	 * @param array  $dates  Submitted candidate dates.
+	 * @param array  $ranges Submitted candidate ranges.
 	 * @param int    $window Window in force, in seconds.
 	 * @param string $label  Case description for failure messages.
 	 * @return void
 	 */
-	private function assert_storable_as_a_new_enquiry( $email, array $dates, $window, $label ) {
-		$normalised = self::normalise( $dates );
+	private function assert_storable_as_a_new_enquiry( $email, array $ranges, $window, $label ) {
+		$normalised = self::normalise( $ranges );
 		$count      = count( $normalised );
 
-		if ( $window <= 0 || $count < 1 || $count > self::DATES_MAX ) {
+		if ( $window <= 0 || $count < 1 || $count > self::RANGES_MAX ) {
 			return;
 		}
 
 		// The trimmed address, because that is what an intake would store: the
 		// Validator trims before the store sees the value. Detection is then asked
 		// with the address as submitted, padding and all.
-		$created = $this->seed( trim( $email ), $dates, 0 );
+		$created = $this->seed( trim( $email ), $ranges, 0 );
 
 		$this->assertSame(
 			$created,
-			DuplicateDetector::find_duplicate( $email, $dates ),
+			DuplicateDetector::find_duplicate( $email, $ranges ),
 			'A stored submission should be the enquiry an immediate resubmission duplicates. ' . $label
 		);
 	}
@@ -475,31 +494,31 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 	 * dropping that conjunct is caught by one of them.
 	 *
 	 * @param string $email  Stored address.
-	 * @param array  $dates  Stored candidate dates.
+	 * @param array  $ranges Stored candidate ranges.
 	 * @param int    $window Window in force, in seconds.
 	 * @return void
 	 */
-	private function seed_decoys( $email, array $dates, $window ) {
-		// Same dates, another enquirer.
-		$this->seed( self::distinct_email( $email, 'decoy' ), $dates, 0 );
+	private function seed_decoys( $email, array $ranges, $window ) {
+		// Same ranges, another enquirer.
+		$this->seed( self::distinct_email( $email, 'decoy' ), $ranges, 0 );
 
-		// Same enquirer, dates that share nothing with the stored set — nor with
+		// Same enquirer, ranges that share nothing with the stored set — nor with
 		// any set a submission can carry.
-		$this->seed( $email, self::dates_at( self::DECOY_OFFSET, count( $dates ) ), 0 );
+		$this->seed( $email, self::ranges_at( self::DECOY_OFFSET, count( $ranges ) ), 0 );
 
-		// Same enquirer and the same dates, but long out of range.
-		$this->seed( $email, $dates, $window + self::DECOY_OFFSET );
+		// Same enquirer and the same ranges, but long out of range.
+		$this->seed( $email, $ranges, $window + self::DECOY_OFFSET );
 	}
 
 	/**
 	 * Store one enquiry a given number of seconds before "now".
 	 *
 	 * @param string $email       Email address.
-	 * @param array  $dates       Candidate dates.
+	 * @param array  $ranges      Candidate date ranges.
 	 * @param int    $seconds_ago Age of the enquiry, in seconds.
 	 * @return int Enquiry identifier.
 	 */
-	private function seed( $email, array $dates, $seconds_ago ) {
+	private function seed( $email, array $ranges, $seconds_ago ) {
 		$created = Clock::mysql( Clock::offset( -1 * (int) $seconds_ago, self::NOW ) );
 
 		$id = EnquiryStore::create(
@@ -513,7 +532,7 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 				'status_changed_at' => $created,
 				'source'            => 'webhook:fixture',
 			),
-			$dates,
+			$ranges,
 			array(),
 			array( 'seeded' => true )
 		);
@@ -529,20 +548,39 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * A date set of `$count` dates drawn from one offset family.
+	 * A range set of `$count` ranges drawn from one offset family.
 	 *
 	 * @param int $family Day offset the family starts at.
-	 * @param int $count  How many dates; at least one.
-	 * @return string[]
+	 * @param int $count  How many ranges; at least one.
+	 * @return array[]
 	 */
-	private static function dates_at( $family, $count ) {
-		$dates = array();
+	private static function ranges_at( $family, $count ) {
+		$ranges = array();
 
 		for ( $index = 1; $index <= max( 1, (int) $count ); $index++ ) {
-			$dates[] = self::date_at( $family, $index );
+			$ranges[] = self::range_at( $family, $index );
 		}
 
-		return $dates;
+		return $ranges;
+	}
+
+	/**
+	 * One two-day range from an offset family.
+	 *
+	 * Members of a family are spaced three days apart, so no two of them touch and
+	 * a set of them holds as many distinct ranges as its count.
+	 *
+	 * @param int $family Day offset the family starts at.
+	 * @param int $index  Position within the family; 1 is the first.
+	 * @return array{start:string,end:string}
+	 */
+	private static function range_at( $family, $index ) {
+		$start = ( 3 * (int) $index ) - 2;
+
+		return array(
+			'start' => self::date_at( $family, $start ),
+			'end'   => self::date_at( $family, $start + 1 ),
+		);
 	}
 
 	/**
@@ -576,25 +614,39 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Reduce candidate dates to the sorted set of `Y-m-d` values the store holds.
+	 * Reduce candidate ranges to the sorted set of `start/end` keys the store
+	 * holds.
 	 *
 	 * The oracle's notion of set equality, written independently of the one under
-	 * test.
+	 * test. Both bounds are part of the key, so two ranges sharing a first day but
+	 * not a last one are two members rather than one.
 	 *
-	 * @param array $dates Candidate dates.
+	 * @param array $ranges Candidate date ranges.
 	 * @return string[]
 	 */
-	private static function normalise( array $dates ) {
+	private static function normalise( array $ranges ) {
 		$set = array();
 
-		foreach ( $dates as $date ) {
-			$date = trim( (string) $date );
+		foreach ( $ranges as $range ) {
+			if ( is_array( $range ) ) {
+				$start = trim( (string) $range['start'] );
+				$end   = trim( (string) $range['end'] );
+			} else {
+				$start = trim( (string) $range );
+				$end   = $start;
+			}
 
-			if ( '' === $date || in_array( $date, $set, true ) ) {
+			if ( '' === $start || '' === $end ) {
 				continue;
 			}
 
-			$set[] = $date;
+			$key = $start . '/' . $end;
+
+			if ( in_array( $key, $set, true ) ) {
+				continue;
+			}
+
+			$set[] = $key;
 		}
 
 		sort( $set );
@@ -612,10 +664,10 @@ class DuplicateDetectionPropertyTest extends WP_UnitTestCase {
 	 */
 	private static function label( array $case, $window, $elapsed ) {
 		return sprintf(
-			'[email: %s, dates: %s (%d stored), window: %d, elapsed: %d, twin gap: %d]',
+			'[email: %s, ranges: %s (%d stored), window: %d, elapsed: %d, twin gap: %d]',
 			$case['email_relation'],
-			$case['date_relation'],
-			count( $case['dates'] ),
+			$case['range_relation'],
+			count( $case['ranges'] ),
 			$window,
 			$elapsed,
 			$case['twin_gap']

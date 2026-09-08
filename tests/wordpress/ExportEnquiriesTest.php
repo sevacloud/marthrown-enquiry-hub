@@ -31,7 +31,16 @@ class ExportEnquiriesTest extends WP_UnitTestCase {
 		'total_guests'     => 120,
 		'event_type'       => array( 'Wedding', 'Party' ),
 		'site_exclusivity' => array( 'Full Site' ),
-		'selected_dates'   => array( '2026-05-01', '2026-05-02' ),
+		'date_ranges'      => array(
+			array(
+				'start' => '2026-05-01',
+				'end'   => '2026-05-03',
+			),
+			array(
+				'start' => '2026-05-09',
+				'end'   => '2026-05-09',
+			),
+		),
 		'status'           => 'quoted',
 		'source'           => 'kadence',
 		'created_at'       => '2026-01-02 09:00:00',
@@ -82,7 +91,9 @@ class ExportEnquiriesTest extends WP_UnitTestCase {
 				120,
 				'Wedding, Party',
 				'Full Site',
-				'2026-05-01, 2026-05-02',
+				// The ideal range spans three days and reads as a span; the
+				// alternative is a single day and reads as that one date.
+				'2026-05-01 to 2026-05-03, 2026-05-09',
 				'quoted',
 				'kadence',
 				'2026-01-02 09:00:00',

@@ -80,7 +80,7 @@ class SchemaUpgradePropertyTest extends WP_UnitTestCase {
 			'decoy' => 'status',
 		),
 		'dates'      => array(
-			'index' => 'event_date',
+			'index' => 'end_date',
 			'decoy' => 'enquiry_id',
 		),
 		'terms'      => array(
@@ -212,8 +212,10 @@ class SchemaUpgradePropertyTest extends WP_UnitTestCase {
 				$result = Schema::maybe_upgrade();
 				$logged = $this->stop_capturing_log( $log );
 
-				$this->assertTrue( $result, 'An upgrade from below the current version should succeed.' );
+				// The log is asserted first: where an upgrade did fail, the logged
+				// reason says which table and why, which the bare `false` does not.
 				$this->assertSame( '', $logged, 'A successful upgrade should record no failure.' );
+				$this->assertTrue( $result, 'An upgrade from below the current version should succeed.' );
 
 				// The change defined for the version range was applied: every
 				// table exists and carries its declared columns.
@@ -286,7 +288,7 @@ class SchemaUpgradePropertyTest extends WP_UnitTestCase {
 				'text'    => Generators::adversarial_string(),
 				'email'   => Generators::email(),
 				'guests'  => Generators::total_guests_or_unsupplied(),
-				'date'    => Generators::candidate_date(),
+				'range'   => Generators::candidate_range(),
 			)
 		);
 	}
@@ -309,7 +311,7 @@ class SchemaUpgradePropertyTest extends WP_UnitTestCase {
 				'text'    => Generators::adversarial_string(),
 				'email'   => Generators::email(),
 				'guests'  => Generators::total_guests_or_unsupplied(),
-				'date'    => Generators::candidate_date(),
+				'range'   => Generators::candidate_range(),
 			)
 		);
 	}
@@ -492,7 +494,9 @@ class SchemaUpgradePropertyTest extends WP_UnitTestCase {
 			),
 			'dates'      => array(
 				'enquiry_id' => $index,
-				'event_date' => $case['date'],
+				'start_date' => $case['range']['start'],
+				'end_date'   => $case['range']['end'],
+				'position'   => 0,
 			),
 			'terms'      => array(
 				'enquiry_id' => $index,

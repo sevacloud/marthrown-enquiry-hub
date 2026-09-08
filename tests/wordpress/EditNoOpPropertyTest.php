@@ -532,7 +532,7 @@ class EditNoOpPropertyTest extends WP_UnitTestCase {
 				'repeats'    => (int) $case['repeats'],
 				'mask'       => (int) $case['mask'],
 				'submitted'  => array_keys( self::stored_values( $stored, (int) $case['mask'] ) ),
-				'dates'      => count( (array) $stored['selected_dates'] ),
+				'ranges'     => count( (array) $stored['date_ranges'] ),
 				'terms'      => count( (array) $stored['event_type'] ) + count( (array) $stored['site_exclusivity'] ),
 				'guests'     => $stored['total_guests'],
 				'phone'      => '' === (string) $stored['phone'] ? 'empty' : 'set',

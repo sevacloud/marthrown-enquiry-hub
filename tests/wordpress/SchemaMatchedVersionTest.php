@@ -246,14 +246,20 @@ class SchemaMatchedVersionTest extends WP_UnitTestCase {
 
 			$enquiry_id = (int) $wpdb->insert_id;
 
-			foreach ( $fields['selected_dates'] as $date ) {
+			$position = 0;
+
+			foreach ( $fields['date_ranges'] as $range ) {
 				$wpdb->insert(
 					Schema::table( 'dates' ),
 					array(
 						'enquiry_id' => $enquiry_id,
-						'event_date' => $date,
+						'start_date' => $range['start'],
+						'end_date'   => $range['end'],
+						'position'   => $position,
 					)
 				);
+
+				++$position;
 			}
 
 			foreach ( array( 'event_type', 'site_exclusivity' ) as $taxonomy ) {

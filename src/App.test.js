@@ -37,7 +37,7 @@ const LIST = {
 			last_name: 'Lovelace',
 			email: 'ada@example.com',
 			phone: '',
-			selected_dates: [ '2026-05-01' ],
+			date_ranges: [ { start: '2026-05-01', end: '2026-05-01' } ],
 			status: 'new',
 			is_test: false,
 			created_at: '2026-01-02 09:00:00',

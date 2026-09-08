@@ -39,8 +39,11 @@ class Schema {
 
 	/**
 	 * Schema version this build of the plugin expects.
+	 *
+	 * Version 2 turned the candidate date table from one row per day into one
+	 * row per date *range* — see `migrate_dates_to_ranges()`.
 	 */
-	const CURRENT_VERSION = 1;
+	const CURRENT_VERSION = 2;
 
 	/**
 	 * Component prefix applied after the WordPress table prefix.
@@ -236,6 +239,19 @@ class Schema {
 			}
 		}
 
+		/*
+		 * The table definitions are re-applied after the steps, not before: a
+		 * step renaming a column has to run while the old name is still there,
+		 * and `dbDelta()` adds the new column without removing the old one, so
+		 * installing first would leave the step looking at a table that already
+		 * carries both and skipping the rename — with the data still in the
+		 * column nothing reads any more. Afterwards it is the ordinary
+		 * idempotent pass, and it is what creates a table that went missing.
+		 */
+		if ( ! self::install() ) {
+			return false;
+		}
+
 		// Recorded only once every step has succeeded (Requirement 1.11).
 		return self::record_version();
 	}
@@ -247,14 +263,19 @@ class Schema {
 	 * `table` key naming the table it touches and a `callback` key holding that
 	 * callable, which makes for a more useful failure log line.
 	 *
-	 * Version 1 is the initial install, handled by `install()`, so there is
-	 * nothing here yet. The `meh_schema_migrations` filter exists so a later
-	 * version — or a test — can add steps without changing this method.
+	 * Version 1 is the initial install, handled by `install()`, so it has no step
+	 * of its own. The `meh_schema_migrations` filter exists so a later version —
+	 * or a test — can add steps without changing this method.
 	 *
 	 * @return array<int,callable|array> Steps keyed by target version.
 	 */
 	protected static function migrations() {
-		$migrations = array();
+		$migrations = array(
+			2 => array(
+				'table'    => 'dates',
+				'callback' => array( __CLASS__, 'migrate_dates_to_ranges' ),
+			),
+		);
 
 		/**
 		 * Filter the schema migration steps.
@@ -349,6 +370,286 @@ class Schema {
 		}
 
 		return true;
+	}
+
+	/**
+	 * Version 2: turn one row per candidate day into one row per date range.
+	 *
+	 * The old table held a day list, which is what a sending form's start/end
+	 * pair was expanded into on the way in. This undoes that expansion:
+	 * consecutive days collapse back into the range they came from, and a gap
+	 * starts a new one, so a submission of the 1st to the 3rd and the 10th
+	 * becomes two ranges rather than four days or one eleven-day span. A lone day
+	 * becomes a range whose start and end are the same date.
+	 *
+	 * Nothing is discarded. An enquiry whose days collapse into more than three
+	 * ranges keeps all of them, even though three is the most a new submission may
+	 * carry: the limit governs what may be entered, not what was already
+	 * recorded, and dropping the fourth would be destroying enquiry data to
+	 * satisfy a rule that did not exist when it was taken.
+	 *
+	 * Idempotent by construction. The rename is skipped when `start_date` is
+	 * already present, and collapsing an already-collapsed table is a no-op:
+	 * every row is its own range, and two ranges are only merged when they
+	 * genuinely abut.
+	 *
+	 * A table that is not there is nothing to migrate rather than a failure: the
+	 * install pass that follows the steps creates it in its range shape, and
+	 * there are no days in it to collapse.
+	 *
+	 * @return bool
+	 */
+	public static function migrate_dates_to_ranges() {
+		global $wpdb;
+
+		$table = self::table( 'dates' );
+
+		if ( ! isset( $wpdb ) || '' === $table ) {
+			self::fail( $table, 'candidate date table missing' );
+
+			return false;
+		}
+
+		if ( ! self::table_exists( $table ) ) {
+			return true;
+		}
+
+		if ( ! self::widen_dates_table( $table ) ) {
+			return false;
+		}
+
+		return self::collapse_days_into_ranges( $table );
+	}
+
+	/**
+	 * Give the candidate date table its range columns.
+	 *
+	 * Each step is skipped when its column is already there, so this can run
+	 * against a half-migrated table — which is the state a failure part-way
+	 * through leaves behind, the version option having stayed where it was.
+	 *
+	 * @param string $table Fully qualified table name.
+	 * @return bool
+	 */
+	protected static function widen_dates_table( $table ) {
+		global $wpdb;
+
+		$columns = self::columns_of( $table );
+
+		if ( in_array( 'event_date', $columns, true ) && ! in_array( 'start_date', $columns, true ) ) {
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			if ( false === $wpdb->query( "ALTER TABLE {$table} CHANGE event_date start_date date NOT NULL DEFAULT '0000-00-00'" ) ) {
+				self::fail( $table, 'could not rename event_date to start_date' );
+
+				return false;
+			}
+
+			$columns = self::columns_of( $table );
+		}
+
+		if ( ! in_array( 'end_date', $columns, true ) ) {
+			// A day list has no end, so every migrated row starts as the single
+			// day it already was; the collapse below joins the runs up.
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			if ( false === $wpdb->query( "ALTER TABLE {$table} ADD end_date date NOT NULL DEFAULT '0000-00-00' AFTER start_date, ADD KEY end_date (end_date)" ) ) {
+				self::fail( $table, 'could not add end_date' );
+
+				return false;
+			}
+
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			$wpdb->query( "UPDATE {$table} SET end_date = start_date WHERE end_date = '0000-00-00'" );
+		}
+
+		if ( ! in_array( 'position', $columns, true ) ) {
+			// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+			if ( false === $wpdb->query( "ALTER TABLE {$table} ADD position tinyint(3) unsigned NOT NULL DEFAULT '0' AFTER end_date" ) ) {
+				self::fail( $table, 'could not add position' );
+
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Rewrite each enquiry's rows as the ranges its days describe.
+	 *
+	 * One enquiry at a time, so a table too large to hold in memory is still
+	 * migratable and a failure part-way through leaves the enquiries already done
+	 * in their new shape and the rest in their old one — both of which this method
+	 * reads correctly on the retry.
+	 *
+	 * @param string $table Fully qualified table name.
+	 * @return bool
+	 */
+	protected static function collapse_days_into_ranges( $table ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$ids = $wpdb->get_col( "SELECT DISTINCT enquiry_id FROM {$table} ORDER BY enquiry_id ASC" );
+
+		if ( ! is_array( $ids ) ) {
+			return true;
+		}
+
+		foreach ( $ids as $enquiry_id ) {
+			$enquiry_id = (int) $enquiry_id;
+
+			$rows = $wpdb->get_results(
+				$wpdb->prepare(
+					// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+					"SELECT start_date, end_date, position FROM {$table} WHERE enquiry_id = %d ORDER BY start_date ASC, end_date ASC, id ASC",
+					$enquiry_id
+				),
+				ARRAY_A
+			);
+
+			if ( ! is_array( $rows ) || array() === $rows ) {
+				continue;
+			}
+
+			$ranges = self::merge_adjacent( $rows );
+
+			if ( self::already_ranges( $rows, $ranges ) ) {
+				// Nothing to collapse and nothing to renumber, so the rows are
+				// left where they are: rewriting them would change no date and
+				// no rank, only every row's identifier.
+				continue;
+			}
+
+			$wpdb->delete( $table, array( 'enquiry_id' => $enquiry_id ), array( '%d' ) );
+
+			foreach ( $ranges as $position => $range ) {
+				$inserted = $wpdb->insert(
+					$table,
+					array(
+						'enquiry_id' => $enquiry_id,
+						'start_date' => $range['start'],
+						'end_date'   => $range['end'],
+						'position'   => $position,
+					),
+					array( '%d', '%s', '%s', '%d' )
+				);
+
+				if ( false === $inserted ) {
+					self::fail( $table, 'could not write range for enquiry ' . $enquiry_id );
+
+					return false;
+				}
+			}
+		}
+
+		return true;
+	}
+
+	/**
+	 * Whether an enquiry's rows already hold exactly the ranges they describe.
+	 *
+	 * Two things have to be true: one row per merged range, bound for bound, and
+	 * ranks that are already the numbering this migration would assign — the
+	 * whole of 0 to n-1, in any order. The second is what keeps a table whose
+	 * ideal range is not its earliest one from being renumbered chronologically:
+	 * rank is the enquirer's preference, and reordering it would change what the
+	 * record says.
+	 *
+	 * @param array $rows   Rows for one enquiry, in start order.
+	 * @param array $ranges Merged ranges, in start order.
+	 * @return bool
+	 */
+	protected static function already_ranges( array $rows, array $ranges ) {
+		if ( count( $rows ) !== count( $ranges ) ) {
+			return false;
+		}
+
+		$positions = array();
+
+		foreach ( array_values( $rows ) as $index => $row ) {
+			$start = isset( $row['start_date'] ) ? (string) $row['start_date'] : '';
+			$end   = isset( $row['end_date'] ) ? (string) $row['end_date'] : '';
+
+			if ( $start !== $ranges[ $index ]['start'] || $end !== $ranges[ $index ]['end'] ) {
+				return false;
+			}
+
+			$positions[] = isset( $row['position'] ) ? (int) $row['position'] : -1;
+		}
+
+		sort( $positions, SORT_NUMERIC );
+
+		return range( 0, count( $rows ) - 1 ) === $positions;
+	}
+
+	/**
+	 * Join rows that touch or overlap into single ranges, oldest first.
+	 *
+	 * Two ranges are joined when the second begins no later than the day after
+	 * the first ends, which is what makes a run of consecutive days one range and
+	 * leaves a gap of a day or more as two.
+	 *
+	 * @param array $rows Rows carrying `start_date` and `end_date`, in start order.
+	 * @return array<int,array{start:string,end:string}>
+	 */
+	protected static function merge_adjacent( array $rows ) {
+		$ranges = array();
+
+		foreach ( $rows as $row ) {
+			$start = isset( $row['start_date'] ) ? (string) $row['start_date'] : '';
+			$end   = isset( $row['end_date'] ) ? (string) $row['end_date'] : '';
+
+			if ( '' === $start || '0000-00-00' === $start ) {
+				continue;
+			}
+
+			if ( '' === $end || '0000-00-00' === $end || $end < $start ) {
+				$end = $start;
+			}
+
+			$last = array() === $ranges ? null : count( $ranges ) - 1;
+
+			if ( null !== $last && $start <= self::day_after( $ranges[ $last ]['end'] ) ) {
+				if ( $end > $ranges[ $last ]['end'] ) {
+					$ranges[ $last ]['end'] = $end;
+				}
+
+				continue;
+			}
+
+			$ranges[] = array(
+				'start' => $start,
+				'end'   => $end,
+			);
+		}
+
+		return $ranges;
+	}
+
+	/**
+	 * The day after a `Y-m-d` date.
+	 *
+	 * @param string $date Date as `Y-m-d`.
+	 * @return string
+	 */
+	protected static function day_after( $date ) {
+		$stamp = strtotime( (string) $date . ' +1 day' );
+
+		return false === $stamp ? (string) $date : gmdate( 'Y-m-d', $stamp );
+	}
+
+	/**
+	 * The column names of a table.
+	 *
+	 * @param string $table Fully qualified table name.
+	 * @return string[]
+	 */
+	protected static function columns_of( $table ) {
+		global $wpdb;
+
+		// phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+		$columns = $wpdb->get_col( "SHOW COLUMNS FROM {$table}" );
+
+		return is_array( $columns ) ? array_map( 'strval', $columns ) : array();
 	}
 
 	/**
@@ -471,16 +772,24 @@ class Schema {
 	KEY is_test (is_test)
 ) {$charset_collate};";
 
-		// One row per candidate date, 1 to 10 per enquiry, day precision
-		// (Requirement 1.2). `event_date` is indexed for the candidate date
-		// range filter.
+		// One row per candidate date *range*, day precision, up to three per
+		// enquiry: `position` 0 is the ideal range every enquiry must carry, and
+		// 1 and 2 are the optional alternatives (Requirement 1.2, as revised).
+		// A single day is a range whose start and end are the same date, which is
+		// why there is no separate shape for one.
+		//
+		// Both bounds are indexed: the list filter of Requirement 12.8 asks which
+		// enquiries have a range overlapping a window, which reads both ends.
 		$schemas['dates'] = "CREATE TABLE {$dates} (
 	id bigint(20) unsigned NOT NULL auto_increment,
 	enquiry_id bigint(20) unsigned NOT NULL DEFAULT '0',
-	event_date date NOT NULL DEFAULT '0000-00-00',
+	start_date date NOT NULL DEFAULT '0000-00-00',
+	end_date date NOT NULL DEFAULT '0000-00-00',
+	position tinyint(3) unsigned NOT NULL DEFAULT '0',
 	PRIMARY KEY  (id),
 	KEY enquiry_id (enquiry_id),
-	KEY event_date (event_date)
+	KEY start_date (start_date),
+	KEY end_date (end_date)
 ) {$charset_collate};";
 
 		// `event_type` and `site_exclusivity` share this table, discriminated by

@@ -7,14 +7,15 @@
  * of any `source` value including one created from an intake webhook request, one
  * created manually and one created by the migration runner, and any sequence of
  * valid enquiry edit requests each carrying any subset of `first_name`,
- * `last_name`, `email`, `phone`, `total_guests`, `message`, `selected_dates`,
+ * `last_name`, `email`, `phone`, `total_guests`, `message`, `date_ranges`,
  * `event_type` and `site_exclusivity`, after each applied request:
  *
  * - the stored value of every field present in that request equals the submitted
  *   value with HTML tags removed and truncation applied, and the stored value of
  *   every field absent from that request is unchanged;
- * - a submitted `selected_dates`, `event_type` or `site_exclusivity` set replaces
- *   that set exactly, and a set absent from the request is unchanged;
+ * - a submitted `event_type` or `site_exclusivity` set replaces that set exactly,
+ *   a submitted `date_ranges` list replaces that list exactly, rank order and all,
+ *   and either absent from the request is unchanged;
  * - `status`, `status_changed_at`, `created_at`, `source`, `is_test`,
  *   `booking_id` and the payload snapshot are byte-identical to their values
  *   before the request;
@@ -130,8 +131,18 @@ class EditAppliedPropertyTest extends WP_UnitTestCase {
 	/** The six scalar fields an edit may carry (Requirement 19.1). */
 	const SCALARS = array( 'first_name', 'last_name', 'email', 'phone', 'total_guests', 'message' );
 
-	/** The three set-valued fields an edit may carry (Requirement 19.1). */
-	const SETS = array( 'selected_dates', 'event_type', 'site_exclusivity' );
+	/** The two set-valued fields an edit may carry (Requirement 19.1). */
+	const SETS = array( 'event_type', 'site_exclusivity' );
+
+	/**
+	 * The ranked list-valued field an edit may carry (Requirement 19.1).
+	 *
+	 * Kept apart from self::SETS because rank order is part of the value: the
+	 * ideal range first, then the alternatives. Two lists holding the same three
+	 * ranges in a different order are two different answers to "when would suit
+	 * you best", so they are compared as lists rather than as sets throughout.
+	 */
+	const LISTS = array( 'date_ranges' );
 
 	/** Columns an edit never writes (Requirement 19.9), plus the snapshot (19.11). */
 	const PROTECTED_COLUMNS = array( 'status', 'status_changed_at', 'created_at', 'source', 'is_test', 'booking_id', 'payload' );
@@ -357,6 +368,24 @@ class EditAppliedPropertyTest extends WP_UnitTestCase {
 				$field . ' is replaced by exactly the submitted set. ' . $label
 			);
 		}
+
+		foreach ( self::LISTS as $field ) {
+			if ( ! array_key_exists( $field, $request ) ) {
+				$this->assertSame(
+					$before[ $field ],
+					$after[ $field ],
+					$field . ' is absent from the request, so that list is unchanged. ' . $label
+				);
+
+				continue;
+			}
+
+			$this->assertSame(
+				array_values( (array) $request[ $field ] ),
+				$after[ $field ],
+				$field . ' is replaced by exactly the submitted list, in the submitted order. ' . $label
+			);
+		}
 	}
 
 	/**
@@ -542,7 +571,7 @@ class EditAppliedPropertyTest extends WP_UnitTestCase {
 				'phone'            => Generators::phone_or_empty(),
 				'total_guests'     => Generators::total_guests_or_unsupplied(),
 				'message'          => Generators::message_or_empty(),
-				'selected_dates'   => Generators::candidate_dates( 1, 4 ),
+				'date_ranges'      => Generators::candidate_ranges( 1, Generators::RANGES_MAX ),
 				'event_type'       => Generators::allowed_term_set( 'event_type', 0 ),
 				'site_exclusivity' => Generators::allowed_term_set( 'site_exclusivity', 0 ),
 			)
@@ -575,7 +604,7 @@ class EditAppliedPropertyTest extends WP_UnitTestCase {
 		$modes  = array();
 		$values = array();
 
-		foreach ( array_merge( self::SCALARS, self::SETS ) as $field ) {
+		foreach ( array_merge( self::SCALARS, self::LISTS, self::SETS ) as $field ) {
 			$modes[ $field ]  = \Eris\Generators::elements(
 				array( self::MODE_ABSENT, self::MODE_CHANGED, self::MODE_REPEATED )
 			);
@@ -618,8 +647,8 @@ class EditAppliedPropertyTest extends WP_UnitTestCase {
 			case 'message':
 				return \Eris\Generators::oneOf( Generators::message_or_empty(), self::marked_up( $field ) );
 
-			case 'selected_dates':
-				return Generators::candidate_dates( 1, 4 );
+			case 'date_ranges':
+				return Generators::candidate_ranges( 1, Generators::RANGES_MAX );
 
 			default:
 				return Generators::allowed_term_set( $field, 0 );
@@ -685,7 +714,7 @@ class EditAppliedPropertyTest extends WP_UnitTestCase {
 		$values  = (array) $plan['values'];
 		$request = array();
 
-		foreach ( array_merge( self::SCALARS, self::SETS ) as $field ) {
+		foreach ( array_merge( self::SCALARS, self::LISTS, self::SETS ) as $field ) {
 			$mode = isset( $modes[ $field ] ) ? (string) $modes[ $field ] : self::MODE_ABSENT;
 
 			if ( self::MODE_ABSENT === $mode ) {
@@ -728,7 +757,7 @@ class EditAppliedPropertyTest extends WP_UnitTestCase {
 				'source'            => (string) $case['source'],
 				'is_test'           => $case['is_test'] ? 1 : 0,
 			),
-			(array) $fields['selected_dates'],
+			(array) $fields['date_ranges'],
 			array(
 				'event_type'       => (array) $fields['event_type'],
 				'site_exclusivity' => (array) $fields['site_exclusivity'],
@@ -800,6 +829,13 @@ class EditAppliedPropertyTest extends WP_UnitTestCase {
 			}
 		}
 
+		// As lists, so a reordering counts as a change: it is one.
+		foreach ( self::LISTS as $field ) {
+			if ( $before[ $field ] !== $after[ $field ] ) {
+				$changed[] = $field;
+			}
+		}
+
 		sort( $changed );
 
 		return $changed;
@@ -832,13 +868,28 @@ class EditAppliedPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * A value in a form two of them can be compared in, sets as sets.
+	 * A value in a form two of them can be compared in, sets as sets and ranked
+	 * lists as they stand.
+	 *
+	 * A list of ranges is left alone: its members are arrays rather than strings,
+	 * and its order carries meaning, so neither sorting nor stringifying it would
+	 * be a comparison of the value that was recorded.
 	 *
 	 * @param mixed $value Stored or recorded value.
 	 * @return mixed
 	 */
 	private static function comparable( $value ) {
-		return is_array( $value ) ? self::as_set( $value ) : $value;
+		if ( ! is_array( $value ) ) {
+			return $value;
+		}
+
+		foreach ( $value as $member ) {
+			if ( is_array( $member ) ) {
+				return array_values( $value );
+			}
+		}
+
+		return self::as_set( $value );
 	}
 
 	/**

@@ -11,8 +11,9 @@
  * supplied filter conjunctively, where search matches `first_name`,
  * `last_name`, `email`, `phone` or `message` case-insensitively and treats `%`
  * and `_` literally, `from` and `to` bound `created_at` inclusively, and the
- * candidate-date range matches an enquiry holding at least one date inside it
- * inclusively; and when exactly one of `date_from` and `date_to` is supplied,
+ * candidate-date window matches an enquiry holding at least one candidate range
+ * that overlaps it, both bounds inclusive; and when exactly one of `date_from`
+ * and `date_to` is supplied,
  * no candidate-date filter is applied and the response warns naming the missing
  * parameter.
  *
@@ -254,10 +255,12 @@ class EnquiryListFilterPropertyTest extends WP_UnitTestCase {
 
 	/**
 	 * One enquiry: the five searchable columns, a status, a creation time, the
-	 * test flag, and zero to three candidate dates.
+	 * test flag, and zero to three candidate date ranges.
 	 *
-	 * Zero candidate dates is a valid state and the interesting one for the
-	 * candidate-date filter, since such an enquiry can never satisfy it.
+	 * Zero candidate ranges is a state the store can hold and the interesting one
+	 * for the candidate-date filter, since such an enquiry can never satisfy it.
+	 * The Validator refuses it on the way in, which is why it is seeded here by
+	 * raw insert rather than through a creation route.
 	 *
 	 * @return \Eris\Generator
 	 */
@@ -273,7 +276,7 @@ class EnquiryListFilterPropertyTest extends WP_UnitTestCase {
 				'created_offset' => \Eris\Generators::choose( 2, 30 ),
 				'created_time'   => \Eris\Generators::elements( self::CREATED_TIMES ),
 				'is_test'        => \Eris\Generators::elements( array( true, false ) ),
-				'dates'          => Generators::candidate_dates( 0, 3 ),
+				'ranges'         => Generators::candidate_ranges( 0, 3 ),
 			)
 		);
 	}
@@ -353,8 +356,12 @@ class EnquiryListFilterPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Bound dates worth applying to the candidate dates: every seeded candidate
-	 * date and its two neighbours.
+	 * Bound dates worth applying to the candidate ranges: both bounds of every
+	 * seeded range, and the two neighbours of each.
+	 *
+	 * Both bounds, because a window touching a range at one end only is exactly
+	 * where an overlap test goes wrong: a comparison using `>` where it wants
+	 * `>=` drops the range whose last day is the window's first.
 	 *
 	 * @param array $population Generated population.
 	 * @return string[]
@@ -363,8 +370,9 @@ class EnquiryListFilterPropertyTest extends WP_UnitTestCase {
 		$dates = array();
 
 		foreach ( $population as $enquiry ) {
-			foreach ( $enquiry['dates'] as $date ) {
-				$dates[] = $date;
+			foreach ( $enquiry['ranges'] as $range ) {
+				$dates[] = $range['start'];
+				$dates[] = $range['end'];
 			}
 		}
 
@@ -637,10 +645,10 @@ class EnquiryListFilterPropertyTest extends WP_UnitTestCase {
 			return false;
 		}
 
-		// Requirements 12.7, 12.8: at least one candidate date inside the range,
-		// and only when both bounds were supplied.
+		// Requirements 12.7, 12.8: at least one candidate range overlapping the
+		// window, and only when both bounds were supplied.
 		if ( isset( $args['date_from'], $args['date_to'] )
-			&& ! self::reference_has_date_within( $enquiry, $args['date_from'], $args['date_to'] ) ) {
+			&& ! self::reference_overlaps_window( $enquiry, $args['date_from'], $args['date_to'] ) ) {
 			return false;
 		}
 
@@ -671,17 +679,22 @@ class EnquiryListFilterPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Whether an enquiry holds at least one candidate date inside the range,
-	 * both bounds inclusive.
+	 * Whether an enquiry holds at least one candidate range overlapping the
+	 * window, both bounds inclusive.
+	 *
+	 * Written as the overlap itself rather than as the negation the SQL uses, so
+	 * the two are independent statements of the same claim: a range meets the
+	 * window when it starts no later than the window ends and ends no earlier
+	 * than the window starts.
 	 *
 	 * @param array  $enquiry Seeded enquiry.
-	 * @param string $from    Range start, `Y-m-d`.
-	 * @param string $to      Range end, `Y-m-d`.
+	 * @param string $from    Window start, `Y-m-d`.
+	 * @param string $to      Window end, `Y-m-d`.
 	 * @return bool
 	 */
-	private static function reference_has_date_within( array $enquiry, $from, $to ) {
-		foreach ( $enquiry['dates'] as $date ) {
-			if ( $date >= $from && $date <= $to ) {
+	private static function reference_overlaps_window( array $enquiry, $from, $to ) {
+		foreach ( $enquiry['ranges'] as $range ) {
+			if ( $range['start'] <= $to && $range['end'] >= $from ) {
 				return true;
 			}
 		}
@@ -861,12 +874,14 @@ class EnquiryListFilterPropertyTest extends WP_UnitTestCase {
 
 			$id = (int) $wpdb->insert_id;
 
-			foreach ( $enquiry['dates'] as $date ) {
+			foreach ( $enquiry['ranges'] as $position => $range ) {
 				$wpdb->insert(
 					Schema::table( 'dates' ),
 					array(
 						'enquiry_id' => $id,
-						'event_date' => $date,
+						'start_date' => $range['start'],
+						'end_date'   => $range['end'],
+						'position'   => (int) $position,
 					)
 				);
 			}

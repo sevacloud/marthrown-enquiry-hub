@@ -115,7 +115,7 @@ class EnquiryCreator {
 
 		$id = EnquiryStore::create(
 			self::row( $checked['values'], $source, $at ),
-			$checked['dates'],
+			$checked['ranges'],
 			$checked['terms'],
 			$payload
 		);

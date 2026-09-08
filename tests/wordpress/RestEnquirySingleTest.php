@@ -137,7 +137,16 @@ class RestEnquirySingleTest extends WP_UnitTestCase {
 				'total_guests'            => 80,
 				'message'                 => 'Looking at a summer weekend.',
 			),
-			array( '2025-08-16', '2025-08-23' ),
+			// A multi-day ideal range and, as the alternative, a bare date
+			// standing for the single day it names: both shapes the store
+			// accepts, so the route is asserted to render both.
+			array(
+				array(
+					'start' => '2025-08-16',
+					'end'   => '2025-08-18',
+				),
+				'2025-08-23',
+			),
 			array(
 				'event_type'       => array( 'wedding', 'reception' ),
 				'site_exclusivity' => array( 'whole_site' ),
@@ -175,7 +184,19 @@ class RestEnquirySingleTest extends WP_UnitTestCase {
 		$this->assertSame( 5, $data['booking_id'] );
 		$this->assertSame( self::NOW, $data['created_at'] );
 
-		$this->assertSame( array( '2025-08-16', '2025-08-23' ), $data['selected_dates'] );
+		$this->assertSame(
+			array(
+				array(
+					'start' => '2025-08-16',
+					'end'   => '2025-08-18',
+				),
+				array(
+					'start' => '2025-08-23',
+					'end'   => '2025-08-23',
+				),
+			),
+			$data['date_ranges']
+		);
 		$this->assertSame( array( 'wedding', 'reception' ), $data['event_type'] );
 		$this->assertSame( array( 'whole_site' ), $data['site_exclusivity'] );
 
@@ -266,7 +287,7 @@ class RestEnquirySingleTest extends WP_UnitTestCase {
 		$this->assertSame( array( $field ), $data['data']['missing'] );
 
 		// No partial representation: none of the enquiry's own fields is present.
-		foreach ( array( 'id', 'first_name', 'selected_dates', 'notes', 'history', 'siblings' ) as $key ) {
+		foreach ( array( 'id', 'first_name', 'date_ranges', 'notes', 'history', 'siblings' ) as $key ) {
 			$this->assertArrayNotHasKey( $key, $data, 'A failed read returns no enquiry field.' );
 		}
 	}
@@ -325,11 +346,11 @@ class RestEnquirySingleTest extends WP_UnitTestCase {
 	 * Write one enquiry through the store and return its identifier.
 	 *
 	 * @param array $fields Column overrides.
-	 * @param array $dates  Candidate dates.
+	 * @param array $ranges Candidate date ranges, each a range or a bare date.
 	 * @param array $terms  Multi-select values by taxonomy.
 	 * @return int
 	 */
-	private function seed_enquiry( array $fields = array(), array $dates = array( '2025-08-16' ), array $terms = array() ) {
+	private function seed_enquiry( array $fields = array(), array $ranges = array( '2025-08-16' ), array $terms = array() ) {
 		$defaults = array(
 			'first_name'        => 'Ada',
 			'last_name'         => 'Lovelace',
@@ -341,7 +362,7 @@ class RestEnquirySingleTest extends WP_UnitTestCase {
 			'source'            => 'webhook:fixture',
 		);
 
-		$id = EnquiryStore::create( array_merge( $defaults, $fields ), $dates, $terms );
+		$id = EnquiryStore::create( array_merge( $defaults, $fields ), $ranges, $terms );
 
 		$this->assertIsInt( $id, 'Seeding an enquiry should succeed.' );
 

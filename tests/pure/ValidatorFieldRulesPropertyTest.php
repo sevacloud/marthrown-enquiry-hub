@@ -58,7 +58,7 @@ class ValidatorFieldRulesPropertyTest extends TestCase {
 	 * offending field. For any otherwise-valid submission, any required-field
 	 * profile, and any single rule violation drawn from {malformed email,
 	 * `total_guests` outside 1–10000 or non-integer, fewer than 1 or more than 10
-	 * candidate dates, an unparseable candidate date, a `phone` value containing
+	 * candidate date ranges, an unreadable candidate date, a `phone` value containing
 	 * no digits, an `event_type` or `site_exclusivity` value outside the
 	 * permitted vocabulary} carried by a field that is present and non-empty
 	 * after trimming, validation fails naming that field, identically under both
@@ -117,7 +117,7 @@ class ValidatorFieldRulesPropertyTest extends TestCase {
 				// Nothing is accepted, so nothing downstream can be created or
 				// changed from this submission.
 				$this->assertSame( array(), $result['values'] );
-				$this->assertSame( array(), $result['dates'] );
+				$this->assertSame( array(), $result['ranges'] );
 				$this->assertSame( array(), $result['terms'] );
 
 				// Identically under both profiles: optionality governs presence
@@ -153,10 +153,14 @@ class ValidatorFieldRulesPropertyTest extends TestCase {
 			self::carried_by( 'total_guests', Generators::non_integer_total_guests() ),
 			// Requirement 3.11: no digits.
 			self::carried_by( 'phone', Generators::digitless_phone() ),
-			// Requirement 3.5: more than 10 candidate dates.
-			self::carried_by( 'selected_dates', Generators::oversized_candidate_dates() ),
-			// Requirement 3.6: an entry that names no calendar date.
-			self::carried_by( 'selected_dates', self::dates_holding_an_unparseable_entry() ),
+			// Requirement 3.5: more than three candidate date ranges.
+			self::carried_by( 'date_ranges', Generators::oversized_candidate_ranges() ),
+			// Requirement 3.6: a bound that names no calendar date.
+			self::carried_by( 'date_ranges', self::ranges_holding_an_unparseable_bound() ),
+			// A range whose end precedes its start is not a range.
+			self::carried_by( 'date_ranges', self::ranges_holding_a_reversed_range() ),
+			// A range missing one of its two bounds is half-drawn.
+			self::carried_by( 'date_ranges', self::ranges_holding_a_half_drawn_range() ),
 			// Requirement 3.12: a value outside the field's vocabulary.
 			self::carried_by( 'event_type', self::terms_holding_a_disallowed_value( 'event_type' ) ),
 			self::carried_by( 'site_exclusivity', self::terms_holding_a_disallowed_value( 'site_exclusivity' ) )
@@ -183,25 +187,90 @@ class ValidatorFieldRulesPropertyTest extends TestCase {
 	}
 
 	/**
-	 * A candidate date set within the accepted count holding one entry that names
-	 * no calendar date.
+	 * A candidate range list within the accepted count holding one range whose
+	 * start names no calendar date.
 	 *
-	 * At most nine valid dates plus the bad one, so the count rule stays out of
-	 * the way and the failure can only come from the entry itself.
+	 * At most two valid ranges plus the bad one, so the count rule stays out of
+	 * the way and the failure can only come from the bound itself.
 	 *
 	 * @return \Eris\Generator
 	 */
-	protected static function dates_holding_an_unparseable_entry() {
+	protected static function ranges_holding_an_unparseable_bound() {
 		return Gen::bind(
-			Generators::candidate_dates( 1, Generators::DATES_MAX - 1 ),
-			function ( array $dates ) {
+			Generators::candidate_ranges( 1, Generators::RANGES_MAX - 1 ),
+			function ( array $ranges ) {
 				return Gen::map(
-					function ( $bad ) use ( $dates ) {
-						return array_merge( $dates, array( $bad ) );
+					function ( $bad ) use ( $ranges ) {
+						return array_merge(
+							$ranges,
+							array(
+								array(
+									'start' => $bad,
+									'end'   => $bad,
+								),
+							)
+						);
 					},
 					Generators::unparseable_date()
 				);
 			}
+		);
+	}
+
+	/**
+	 * A candidate range list within the accepted count holding one range that
+	 * ends before it starts.
+	 *
+	 * Both bounds are real dates, so the failure can only come from their order.
+	 *
+	 * @return \Eris\Generator
+	 */
+	protected static function ranges_holding_a_reversed_range() {
+		return Gen::map(
+			function ( array $ranges ) {
+				$last = $ranges[ count( $ranges ) - 1 ];
+
+				// The generator never emits a reversed range, so the last one is
+				// turned round here: its own two bounds, the wrong way about.
+				$ranges[ count( $ranges ) - 1 ] = array(
+					'start' => $ranges[0]['end'],
+					'end'   => $ranges[0]['start'],
+				);
+
+				// A single-day range cannot be reversed, so the day after its
+				// start stands in for the end that is now too early.
+				if ( $ranges[0]['start'] === $ranges[0]['end'] ) {
+					$ranges[ count( $ranges ) - 1 ] = array(
+						'start' => $last['end'],
+						'end'   => $ranges[0]['start'],
+					);
+				}
+
+				return $ranges;
+			},
+			Generators::candidate_ranges( 2, Generators::RANGES_MAX )
+		);
+	}
+
+	/**
+	 * A candidate range list within the accepted count holding one range with an
+	 * end but no start.
+	 *
+	 * @return \Eris\Generator
+	 */
+	protected static function ranges_holding_a_half_drawn_range() {
+		return Gen::map(
+			function ( array $ranges ) {
+				$last = count( $ranges ) - 1;
+
+				$ranges[ $last ] = array(
+					'start' => '',
+					'end'   => $ranges[ $last ]['end'],
+				);
+
+				return $ranges;
+			},
+			Generators::candidate_ranges( 1, Generators::RANGES_MAX )
 		);
 	}
 
@@ -231,7 +300,7 @@ class ValidatorFieldRulesPropertyTest extends TestCase {
 	/**
 	 * Whatever a validation result accepted for a field, wherever it landed.
 	 *
-	 * The Validator answers with the scalar values, the candidate dates and the
+	 * The Validator answers with the scalar values, the candidate ranges and the
 	 * term sets in three separate keys, so a failure message that wants to show
 	 * "this is what it stored instead" has to look in the right one.
 	 *
@@ -240,8 +309,8 @@ class ValidatorFieldRulesPropertyTest extends TestCase {
 	 * @return mixed
 	 */
 	protected static function accepted( array $result, $field ) {
-		if ( 'selected_dates' === $field ) {
-			return $result['dates'];
+		if ( 'date_ranges' === $field ) {
+			return $result['ranges'];
 		}
 
 		if ( array_key_exists( $field, $result['terms'] ) ) {

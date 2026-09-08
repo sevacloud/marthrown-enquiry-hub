@@ -363,7 +363,7 @@ class StagingTestMarkingPropertyTest extends WP_UnitTestCase {
 	 * A booking created from the enquiry carries the prefixed guest name exactly
 	 * in staging (Requirement 17.3).
 	 *
-	 * The date is one of the enquiry's own candidate dates and the calendar one
+	 * The date is one day of the enquiry's own candidate ranges and the calendar one
 	 * the fake knows, so conversion passes its guards and the booking that lands
 	 * in the fake is the one whose guest name the property is about.
 	 *
@@ -375,8 +375,8 @@ class StagingTestMarkingPropertyTest extends WP_UnitTestCase {
 	private function assert_booking_marking( array $enquiry, array $case, $label ) {
 		$staging     = (bool) $case['staging'];
 		$calendar_id = (int) $case['calendar'];
-		$dates       = array_values( (array) $enquiry['selected_dates'] );
-		$chosen      = (string) $dates[ (int) $case['chosen_index'] % count( $dates ) ];
+		$days        = Generators::days_in_ranges( (array) $enquiry['date_ranges'] );
+		$chosen      = (string) $days[ (int) $case['chosen_index'] % count( $days ) ];
 
 		$result = BookingCreator::create_from_enquiry( (int) $enquiry['id'], $calendar_id, $chosen );
 
@@ -463,9 +463,9 @@ class StagingTestMarkingPropertyTest extends WP_UnitTestCase {
 				'list_id'      => \Eris\Generators::choose( 1, 499 ),
 				'tag_id'       => \Eris\Generators::choose( 500, 999 ),
 				'calendar'     => \Eris\Generators::elements( array( 1, 2 ) ),
-				// Reduced against the drawn date count, so every candidate date
-				// is reachable whatever the size of the set.
-				'chosen_index' => \Eris\Generators::choose( 0, Generators::DATES_MAX - 1 ),
+				// Reduced against the number of days the drawn ranges cover, so
+				// every candidate day is reachable whatever the size of the set.
+				'chosen_index' => \Eris\Generators::choose( 0, 60 ),
 			)
 		);
 	}

@@ -53,12 +53,17 @@ class SchemaFactsTest extends WP_UnitTestCase {
 	/**
 	 * Indexes the design declares on the candidate date table.
 	 *
+	 * Both bounds of a range are indexed, because the list filter's overlap test
+	 * reads them both: a range overlaps the window when its start is not after
+	 * the window's end and its end is not before the window's start.
+	 *
 	 * @var string[]
 	 */
 	protected $date_indexes = array(
 		'PRIMARY',
 		'enquiry_id',
-		'event_date',
+		'start_date',
+		'end_date',
 	);
 
 	/**

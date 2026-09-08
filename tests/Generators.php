@@ -9,7 +9,8 @@
  *          ->then( function ( array $fields ) { … } );
  *
  * The boundary values the design's testing strategy names are emitted by these
- * generators rather than being left to chance: 1 and 10 candidate dates, 0, 1 and
+ * generators rather than being left to chance: 1 and 3 candidate date ranges,
+ * 0, 1 and
  * 20 term values, field values at exactly their stored capacity, `total_guests`
  * of 1 and 10000 and an unsupplied `total_guests` distinct from 0, empty `phone`
  * and `message`, and the adversarial string set.
@@ -52,11 +53,14 @@ class Generators {
 	/** Stored capacity of one multi-select value, in characters. */
 	const TERM_LIMIT = 100;
 
-	/** Fewest candidate dates an enquiry may hold. */
-	const DATES_MIN = 1;
+	/** Fewest candidate date ranges an enquiry may hold: the ideal one. */
+	const RANGES_MIN = 1;
 
-	/** Most candidate dates an enquiry may hold. */
-	const DATES_MAX = 10;
+	/** Most candidate date ranges an enquiry may hold: ideal plus two. */
+	const RANGES_MAX = 3;
+
+	/** Longest range one generated candidate range spans, in days. */
+	const RANGE_DAYS_MAX = 6;
 
 	/** Most values one taxonomy may hold for one enquiry. */
 	const TERMS_MAX = 20;
@@ -150,7 +154,7 @@ class Generators {
 				'phone'            => self::phone(),
 				'total_guests'     => self::total_guests(),
 				'message'          => self::message(),
-				'selected_dates'   => self::candidate_dates(),
+				'date_ranges'      => self::candidate_ranges(),
 				'event_type'       => self::allowed_term_set( 'event_type', 1 ),
 				'site_exclusivity' => self::allowed_term_set( 'site_exclusivity', 1 ),
 			),
@@ -171,10 +175,10 @@ class Generators {
 	public static function minimal_enquiry( array $overrides = array() ) {
 		return self::field_map(
 			array(
-				'first_name'     => self::first_name(),
-				'last_name'      => self::last_name(),
-				'email'          => self::email(),
-				'selected_dates' => self::candidate_dates(),
+				'first_name'  => self::first_name(),
+				'last_name'   => self::last_name(),
+				'email'       => self::email(),
+				'date_ranges' => self::candidate_ranges(),
 			),
 			$overrides
 		);
@@ -431,52 +435,122 @@ class Generators {
 	}
 
 	/* -----------------------------------------------------------------------
-	 * Candidate dates
+	 * Candidate date ranges
 	 * -------------------------------------------------------------------- */
 
 	/**
-	 * A candidate date set holding between $min and $max distinct dates,
-	 * ascending, at day precision.
+	 * A ranked candidate range list holding between $min and $max ranges.
 	 *
-	 * Defaults span the whole accepted range, 1 to 10 (Requirement 1.2), and both
-	 * boundaries are reachable.
+	 * Each entry is `array( 'start' => 'Y-m-d', 'end' => 'Y-m-d' )` with the end
+	 * on or after the start, and every range begins after the previous one ends,
+	 * which is what keeps them distinct: the Validator collapses duplicates, so a
+	 * generator that could emit the same range twice would emit a list shorter
+	 * than the count it chose. Single-day ranges — both bounds the same — are
+	 * reachable, because that is how a one-day enquiry is stored.
 	 *
-	 * @param int $min Fewest dates.
-	 * @param int $max Most dates.
+	 * The list is in generation order, which is the rank the store preserves:
+	 * position 0 is the ideal range. Defaults span the whole accepted range, 1 to
+	 * 3, and both boundaries are reachable.
+	 *
+	 * @param int $min Fewest ranges.
+	 * @param int $max Most ranges.
 	 * @return Generator
 	 */
-	public static function candidate_dates( $min = self::DATES_MIN, $max = self::DATES_MAX ) {
+	public static function candidate_ranges( $min = self::RANGES_MIN, $max = self::RANGES_MAX ) {
 		return \Eris\Generators::bind(
 			\Eris\Generators::choose( (int) $min, (int) $max ),
 			function ( $count ) {
 				if ( $count < 1 ) {
 					return \Eris\Generators::constant( array() );
 				}
+
 				return \Eris\Generators::map(
-					function ( array $gaps ) {
-						$dates  = array();
+					function ( array $steps ) {
+						$ranges = array();
 						$offset = 0;
-						foreach ( $gaps as $gap ) {
-							// Strictly increasing gaps keep every date distinct.
-							$offset += max( 1, (int) $gap );
-							$dates[] = self::date_at( $offset );
+
+						foreach ( $steps as $step ) {
+							// The gap is at least one day, so this range starts
+							// after the last one ended.
+							$offset  += max( 1, (int) $step[0] );
+							$span     = max( 0, (int) $step[1] );
+							$ranges[] = array(
+								'start' => self::date_at( $offset ),
+								'end'   => self::date_at( $offset + $span ),
+							);
+							$offset  += $span;
 						}
-						return $dates;
+
+						return $ranges;
 					},
-					\Eris\Generators::vector( (int) $count, \Eris\Generators::choose( 1, 45 ) )
+					\Eris\Generators::vector(
+						(int) $count,
+						\Eris\Generators::tuple(
+							\Eris\Generators::choose( 1, 45 ),
+							\Eris\Generators::choose( 0, self::RANGE_DAYS_MAX )
+						)
+					)
 				);
 			}
 		);
 	}
 
 	/**
-	 * A candidate date set larger than the accepted maximum, for the rejection
+	 * One candidate range, for fixtures that hold a single row.
+	 *
+	 * @return Generator
+	 */
+	public static function candidate_range() {
+		return \Eris\Generators::map(
+			function ( array $ranges ) {
+				return $ranges[0];
+			},
+			self::candidate_ranges( 1, 1 )
+		);
+	}
+
+	/**
+	 * A candidate range list longer than the accepted maximum, for the rejection
 	 * properties.
 	 *
 	 * @return Generator
 	 */
-	public static function oversized_candidate_dates() {
-		return self::candidate_dates( self::DATES_MAX + 1, self::DATES_MAX + 5 );
+	public static function oversized_candidate_ranges() {
+		return self::candidate_ranges( self::RANGES_MAX + 1, self::RANGES_MAX + 3 );
+	}
+
+	/**
+	 * Every day one generated range covers, inclusive of both bounds.
+	 *
+	 * The store holds ranges, but a booking is one day and several tests need a
+	 * day the enquiry actually offered, so this is how they get one.
+	 *
+	 * @param array $ranges Candidate ranges.
+	 * @return string[] Days as `Y-m-d`, in rank order then chronological.
+	 */
+	public static function days_in_ranges( array $ranges ) {
+		$days = array();
+
+		foreach ( $ranges as $range ) {
+			if ( ! is_array( $range ) || ! isset( $range['start'], $range['end'] ) ) {
+				continue;
+			}
+
+			$cursor = new \DateTimeImmutable( (string) $range['start'], new \DateTimeZone( 'UTC' ) );
+			$end    = new \DateTimeImmutable( (string) $range['end'], new \DateTimeZone( 'UTC' ) );
+
+			while ( $cursor <= $end ) {
+				$day = $cursor->format( 'Y-m-d' );
+
+				if ( ! in_array( $day, $days, true ) ) {
+					$days[] = $day;
+				}
+
+				$cursor = $cursor->modify( '+1 day' );
+			}
+		}
+
+		return $days;
 	}
 
 	/**

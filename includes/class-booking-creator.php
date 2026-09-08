@@ -163,13 +163,14 @@ class BookingCreator {
 		// offered, so a date they never offered is a bad request rather than a
 		// booking nobody agreed to.
 		$chosen = self::to_date( $date );
+		$ranges = isset( $enquiry['date_ranges'] ) ? (array) $enquiry['date_ranges'] : array();
 
-		if ( null === $chosen || ! in_array( $chosen, array_map( 'strval', (array) $enquiry['selected_dates'] ), true ) ) {
+		if ( null === $chosen || ! self::within_candidates( $chosen, $ranges ) ) {
 			return self::error(
 				'meh_booking_date_not_candidate',
-				'The chosen date is not one of the enquiry candidate dates.',
+				'The chosen date is not inside any of the enquiry candidate date ranges.',
 				400,
-				array( 'candidate_dates' => array_values( (array) $enquiry['selected_dates'] ) )
+				array( 'candidate_ranges' => array_values( $ranges ) )
 			);
 		}
 
@@ -362,6 +363,38 @@ class BookingCreator {
 			),
 			admin_url( 'admin.php' )
 		);
+	}
+
+	/**
+	 * Whether a chosen day falls inside any of the enquiry's candidate ranges.
+	 *
+	 * Inclusive of both bounds: an enquirer offering the 1st to the 3rd has
+	 * offered the 1st and the 3rd. The comparison is string-wise, which is exact
+	 * for `Y-m-d` and needs no date arithmetic.
+	 *
+	 * @param string $chosen Chosen date, `Y-m-d`.
+	 * @param array  $ranges Candidate ranges as the store hydrates them.
+	 * @return bool
+	 */
+	protected static function within_candidates( $chosen, array $ranges ) {
+		foreach ( $ranges as $range ) {
+			if ( ! is_array( $range ) || ! isset( $range['start'], $range['end'] ) ) {
+				continue;
+			}
+
+			$start = self::to_date( $range['start'] );
+			$end   = self::to_date( $range['end'] );
+
+			if ( null === $start || null === $end ) {
+				continue;
+			}
+
+			if ( $chosen >= $start && $chosen <= $end ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**

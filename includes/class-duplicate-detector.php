@@ -10,11 +10,12 @@
  *
  * Three decisions shape this class:
  *
- * - **Duplicate identity is email plus the exact candidate date set.** Set
- *   equality, not overlap: a submission whose dates are a subset or a superset
- *   of an existing enquiry's is a different enquiry about different days and is
- *   stored (Requirement 4.2). Outside the window, the same email and the same
- *   dates are a genuine second enquiry (Requirement 4.5).
+ * - **Duplicate identity is email plus the exact candidate range set.** Set
+ *   equality, not overlap: a submission whose ranges are a subset or a superset
+ *   of an existing enquiry's, or which name the same first day but a different
+ *   last one, is a different enquiry about different days and is stored
+ *   (Requirement 4.2). Outside the window, the same email and the same ranges
+ *   are a genuine second enquiry (Requirement 4.5).
  * - **Rate limiting keys on the submitted email address, not the client IP.**
  *   The request is a server-to-server webhook, so the client address is the
  *   site's own on every request and an IP-keyed counter would either throttle
@@ -129,22 +130,28 @@ class DuplicateDetector {
 	/**
 	 * The identifier of the enquiry a submission duplicates, or 0 (Requirement 4.2).
 	 *
-	 * A match needs all three of: the same `email`, a candidate date set equal to
-	 * the existing enquiry's as a set, and a creation time strictly inside the
-	 * window. Elapsed time equal to the window is outside it, matching
+	 * A match needs all three of: the same `email`, a candidate date range list
+	 * equal to the existing enquiry's as a set, and a creation time strictly
+	 * inside the window. Elapsed time equal to the window is outside it, matching
 	 * Requirement 4.5's "created more than 15 minutes earlier" being a new
 	 * enquiry rather than a duplicate.
+	 *
+	 * Compared as a set, so the ranges' order is not part of the identity: what
+	 * this guard is for is the same form arriving twice, and the same three
+	 * fortnights listed in a different order is the same submission however the
+	 * sender happened to serialise it. Reordering them deliberately is an edit,
+	 * which goes through `update()` rather than through here.
 	 *
 	 * The most recently created match is returned, since that is the enquiry the
 	 * rejection row should point a reader at.
 	 *
-	 * @param string $email Submitted email address.
-	 * @param array  $dates Submitted candidate dates, in any order and any
-	 *                      parseable form.
+	 * @param string $email  Submitted email address.
+	 * @param array  $ranges Submitted candidate date ranges, in any order, each
+	 *                       `array{start,end}` or a bare date.
 	 * @return int Existing enquiry identifier, or 0 when the submission is not a
 	 *             duplicate.
 	 */
-	public static function find_duplicate( $email, array $dates ) {
+	public static function find_duplicate( $email, array $ranges ) {
 		global $wpdb;
 
 		$email = trim( (string) $email );
@@ -153,11 +160,11 @@ class DuplicateDetector {
 			return 0;
 		}
 
-		$dates = self::normalise_dates( $dates );
+		$keys = self::normalise_ranges( $ranges );
 
-		if ( ! $dates ) {
-			// No candidate dates means no date set to be equal to, so the
-			// submission cannot satisfy the duplicate identity at all.
+		if ( ! $keys ) {
+			// No candidate ranges means no set to be equal to, so the submission
+			// cannot satisfy the duplicate identity at all.
 			return 0;
 		}
 
@@ -169,24 +176,27 @@ class DuplicateDetector {
 
 		$enquiries    = Schema::table( 'enquiries' );
 		$dates_table  = Schema::table( 'dates' );
-		$total        = count( $dates );
+		$total        = count( $keys );
 		$placeholders = implode( ', ', array_fill( 0, $total, '%s' ) );
 
 		// Set equality in one pass: the candidate holds exactly as many distinct
-		// dates as the submission, and every one of them is in the submitted set.
+		// ranges as the submission, and every one of them is in the submitted set.
 		// Both counts equalling the submitted size makes subset and superset
-		// matches impossible.
+		// matches impossible. A range is keyed by both its bounds, so the 1st to
+		// the 3rd and the 1st to the 10th are two ranges rather than one.
+		$key = "CONCAT( d.start_date, '/', d.end_date )";
+
 		$sql = "SELECT e.id FROM {$enquiries} e"
 			. " INNER JOIN {$dates_table} d ON d.enquiry_id = e.id"
 			. ' WHERE e.email = %s AND e.created_at > %s'
 			. ' GROUP BY e.id'
-			. ' HAVING COUNT( DISTINCT d.event_date ) = %d'
-			. " AND COUNT( DISTINCT CASE WHEN d.event_date IN ( {$placeholders} ) THEN d.event_date END ) = %d"
+			. " HAVING COUNT( DISTINCT {$key} ) = %d"
+			. " AND COUNT( DISTINCT CASE WHEN {$key} IN ( {$placeholders} ) THEN {$key} END ) = %d"
 			. ' ORDER BY e.created_at DESC, e.id DESC LIMIT 1';
 
 		$bindings = array_merge(
 			array( $email, Clock::mysql( Clock::offset( -$window ) ), $total ),
-			$dates,
+			$keys,
 			array( $total )
 		);
 
@@ -336,26 +346,44 @@ class DuplicateDetector {
 	}
 
 	/**
-	 * Reduce submitted candidate dates to a sorted set of `Y-m-d` strings.
+	 * Reduce submitted candidate date ranges to a sorted set of `start/end` keys.
 	 *
-	 * Mirrors what the store wrote: duplicates collapsed, order irrelevant, day
-	 * precision. An unreadable value is dropped rather than failing the call —
+	 * The key shape is the one the comparison SQL builds from the stored columns,
+	 * so what is bound and what is selected are the same string for the same
+	 * range. Duplicates collapse and order is discarded, matching the set
+	 * comparison. An unreadable value is dropped rather than failing the call —
 	 * the Validator, not this guard, is what reports a malformed date.
 	 *
-	 * @param array $dates Submitted candidate dates.
+	 * A bare date is read as the single-day range it stands for, so a sender that
+	 * names one day and a sender that names the same day twice over describe the
+	 * same enquiry to this guard.
+	 *
+	 * @param array $ranges Submitted candidate date ranges.
 	 * @return string[]
 	 */
-	protected static function normalise_dates( array $dates ) {
+	protected static function normalise_ranges( array $ranges ) {
 		$normalised = array();
 
-		foreach ( $dates as $entry ) {
-			$date = self::to_date( $entry );
+		foreach ( $ranges as $entry ) {
+			if ( is_array( $entry ) ) {
+				$start = self::to_date( isset( $entry['start'] ) ? $entry['start'] : null );
+				$end   = self::to_date( isset( $entry['end'] ) ? $entry['end'] : null );
+			} else {
+				$start = self::to_date( $entry );
+				$end   = $start;
+			}
 
-			if ( null === $date || in_array( $date, $normalised, true ) ) {
+			if ( null === $start || null === $end ) {
 				continue;
 			}
 
-			$normalised[] = $date;
+			$key = $start . '/' . $end;
+
+			if ( in_array( $key, $normalised, true ) ) {
+				continue;
+			}
+
+			$normalised[] = $key;
 		}
 
 		sort( $normalised );

@@ -5,19 +5,19 @@
  * Feature: enquiry-data-layer, Property 39: For any manual enquiry creation
  * request that validates under the Manual Validation Profile — over any subset
  * of `phone`, `total_guests`, `message`, `event_type` and `site_exclusivity`
- * omitted or submitted empty, any 1 to 10 candidate dates, any submitting user
+ * omitted or submitted empty, any 1 to 3 candidate date ranges, any submitting user
  * identifier, any receipt time, any site timezone and any environment mode — the
  * route creates exactly one enquiry in which every submitted field value is
  * stored, each omitted or empty scalar stores its empty value and each omitted or
  * empty multi-select stores zero rows; `status` is `new` and the three timestamps
  * all equal the receipt time in the site timezone; `source` is `manual:{user
- * id}`; one candidate date row exists per submitted date and one term row per
+ * id}`; one candidate range row exists per submitted range and one term row per
  * submitted value; the payload snapshot carries every submitted field value;
  * `is_test` and the contact's test marking follow staging mode; exactly one
  * `created` history entry exists carrying the submitting user; and
  * `crm_sync_state` is `synced` on linkage success and `pending` on failure with
  * the enquiry retained either way. And for any sequence of manual creation
- * requests holding the same `email` and the same candidate-date set, arriving
+ * requests holding the same `email` and the same candidate-range set, arriving
  * within any window including one shorter than the duplicate window and the
  * rate-limit period: every one of them creates an enquiry, the duplicate
  * detector and the rate limiter are not consulted, and no rejected intake
@@ -531,7 +531,7 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The candidate dates and both multi-selects equal the submitted values as
+	 * The candidate ranges and both multi-selects equal the submitted values as
 	 * sets, an omitted or empty multi-select being the empty set
 	 * (Requirements 18.5, 18.10).
 	 *
@@ -541,7 +541,13 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 	 * @return void
 	 */
 	private function assert_sets( array $enquiry, array $submitted, $label ) {
-		foreach ( array( 'selected_dates', 'event_type', 'site_exclusivity' ) as $field ) {
+		$this->assertSame(
+			array_values( (array) $submitted['date_ranges'] ),
+			$enquiry['date_ranges'],
+			'Stored date_ranges equals the submitted list, rank order and all. ' . $label
+		);
+
+		foreach ( array( 'event_type', 'site_exclusivity' ) as $field ) {
 			$expected = array_key_exists( $field, $submitted ) ? (array) $submitted[ $field ] : array();
 
 			$this->assertSame(
@@ -553,7 +559,7 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * One candidate date row per submitted date and one term row per submitted
+	 * One candidate range row per submitted range and one term row per submitted
 	 * value, counted in the tables themselves (Requirements 18.5, 18.10).
 	 *
 	 * Counted rather than read back through `find()`, because "zero rows" is the
@@ -572,9 +578,9 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 		$terms = Schema::table( 'terms' );
 
 		$this->assertSame(
-			count( self::as_set( $submitted['selected_dates'] ) ),
+			count( (array) $submitted['date_ranges'] ),
 			(int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$dates} WHERE enquiry_id = %d", $enquiry_id ) ), // phpcs:ignore WordPress.DB
-			'One candidate date row exists per submitted date. ' . $label
+			'One candidate range row exists per submitted range. ' . $label
 		);
 
 		foreach ( array( 'event_type', 'site_exclusivity' ) as $taxonomy ) {
@@ -713,7 +719,7 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 
 	/**
 	 * A run of manual creation requests all holding the same email and the same
-	 * candidate dates, with intake webhook requests interleaved among them.
+	 * candidate ranges, with intake webhook requests interleaved among them.
 	 *
 	 * @param array $case Generated case.
 	 * @return void
@@ -724,7 +730,6 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 		$actor  = $this->users[ (int) $case['user'] % count( $this->users ) ];
 		$fields = $this->submission( $case );
 		$email  = (string) $fields['email'];
-		$dates  = (array) $fields['selected_dates'];
 		$manual = (int) $case['length'];
 		$label  = self::sequence_label( $case );
 		$gaps   = array_values( (array) $case['gaps'] );
@@ -813,7 +818,7 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 		if ( $index > 0 ) {
 			$this->assertGreaterThan(
 				0,
-				DuplicateDetector::find_duplicate( (string) $fields['email'], (array) $fields['selected_dates'] ),
+				DuplicateDetector::find_duplicate( (string) $fields['email'], (array) $fields['date_ranges'] ),
 				'The duplicate detector reports a match at this point, so a route consulting it would refuse.' . $context
 			);
 		}
@@ -836,8 +841,8 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 	 * Submit one interleaved intake webhook request and assert it is guarded
 	 * exactly as Properties 14 and 15 describe.
 	 *
-	 * The first carries the manual sequence's own email and date set, so it is a
-	 * duplicate. The rest carry date sets far outside the generated range and
+	 * The first carries the manual sequence's own email and range set, so it is a
+	 * duplicate. The rest carry range sets far outside the generated span and
 	 * distinct from one another, so none of them is, and the sixth is refused for
 	 * bringing the per-address count up to the limit — the sixth webhook, which is
 	 * only where the limit lands if the manual requests never counted.
@@ -851,7 +856,14 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 		$context = sprintf( ' [webhook request %d] %s', (int) $index + 1, $label );
 
 		if ( $index > 0 ) {
-			$fields['selected_dates'] = array( Generators::date_at( 1000 + ( 20 * (int) $index ) ) );
+			$day = Generators::date_at( 1000 + ( 20 * (int) $index ) );
+
+			$fields['date_ranges'] = array(
+				array(
+					'start' => $day,
+					'end'   => $day,
+				),
+			);
 		}
 
 		$outcome = IntakeHandler::receive( $fields, self::WEBHOOK_SOURCE, Clock::mysql() );
@@ -982,7 +994,7 @@ class ManualCreationPropertyTest extends WP_UnitTestCase {
 					Generators::total_guests()
 				),
 				'message'          => self::safe_message(),
-				'selected_dates'   => Generators::candidate_dates(),
+				'date_ranges'      => Generators::candidate_ranges(),
 				'event_type'       => Generators::allowed_term_set( 'event_type', 1 ),
 				'site_exclusivity' => Generators::allowed_term_set( 'site_exclusivity', 1 ),
 			)

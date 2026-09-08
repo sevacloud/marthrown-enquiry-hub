@@ -57,7 +57,10 @@ const ENQUIRY = {
 	email: 'ada@example.com',
 	phone: '0114 496 0000',
 	total_guests: 12,
-	selected_dates: [ '2026-05-01', '2026-05-02' ],
+	date_ranges: [
+		{ start: '2026-05-01', end: '2026-05-02' },
+		{ start: '2026-06-14', end: '2026-06-14' },
+	],
 	event_type: [ 'wedding' ],
 	site_exclusivity: [ 'whole site' ],
 	message: 'Two nights, marquee on the lawn.',
@@ -270,6 +273,38 @@ describe( 'EnquiryDetail action buttons', () => {
 	} );
 } );
 
+describe( 'EnquiryDetail candidate ranges', () => {
+	it( 'lists the ranges in stored order, ranked, a single day written once', async () => {
+		const { container } = await renderPanel( ENQUIRY );
+
+		const listed = [
+			...container.querySelectorAll( '.meh-detail__ranges li' ),
+		].map( ( node ) => node.textContent.replace( /\s+/g, ' ' ).trim() );
+
+		expect( listed ).toEqual( [
+			'Ideal 2026-05-01 – 2026-05-02',
+			// A range whose bounds match is the one day, not the date twice.
+			'Alternative 1 2026-06-14',
+		] );
+	} );
+
+	it( 'offers every day the ranges cover as a booking date, ideal range first', async () => {
+		await renderPanel( ENQUIRY );
+
+		const options = [
+			...screen.getByLabelText( 'Booking date' ).querySelectorAll( 'option' ),
+		].map( ( option ) => option.value );
+
+		// The two days of the ideal range, then the one alternative day: a
+		// booking is a single day, so the control offers days, not ranges.
+		expect( options ).toEqual( [
+			'2026-05-01',
+			'2026-05-02',
+			'2026-06-14',
+		] );
+	} );
+} );
+
 describe( 'EnquiryDetail edit control', () => {
 	it( 'opens the form on the values the panel is showing', async () => {
 		await renderPanel( ENQUIRY );
@@ -290,12 +325,14 @@ describe( 'EnquiryDetail edit control', () => {
 		expect( screen.getByLabelText( 'Message' ).value ).toBe(
 			'Two nights, marquee on the lawn.'
 		);
-		expect( screen.getByLabelText( 'Start date' ).value ).toBe(
-			'2026-05-01'
-		);
-		expect( screen.getByLabelText( 'End date' ).value ).toBe(
-			'2026-05-02'
-		);
+		// The two stored ranges fill the first two ranked slots, in order, and
+		// the third is left blank.
+		expect(
+			screen.getAllByLabelText( 'Start date' ).map( ( f ) => f.value )
+		).toEqual( [ '2026-05-01', '2026-06-14', '' ] );
+		expect(
+			screen.getAllByLabelText( 'End date' ).map( ( f ) => f.value )
+		).toEqual( [ '2026-05-02', '2026-06-14', '' ] );
 	} );
 
 	it( 'patches /enquiries/{id} with only the fields the user altered', async () => {
