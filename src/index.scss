@@ -314,15 +314,34 @@
    itself, but only in its own admin CSS, which is not loaded on the front end
    (the Calendar view) and whose single-class rules would lose or win against
    ours depending on stylesheet order. Declaring them here — two classes deep,
-   so always the more specific — makes the swatch and the id pill agree on one
-   palette wherever they are rendered. Each is dark enough for white text. */
+   so always the more specific — makes the swatch, the id pill and the calendar
+   bar agree on one palette wherever they are rendered, and it is one palette
+   across all three: a calendar's slot is its position in the calendar list,
+   which both `GET /calendars` and `GET /calendar` build from
+   `SourceWpbs::calendar_names()`, so a calendar is the same colour in the
+   Bookings Manager and in the Calendar overview. Each colour is dark enough
+   for white text. */
 $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 	#a83a8d, #4a6b1f, #9a4b1e, #3858e9;
 
 @for $i from 0 through 9 {
+	$wpbs-color: list.nth($wpbs-booking-colors, $i + 1);
+
+	/* Placeholders carry `.meh-calendar-booking` too but are not bookings, so
+	   they are excluded here and coloured below instead. */
 	.wpbs-list-table-id.wpbs-booking-color-#{$i},
-	.wpbs-calendar-legend .wpbs-booking-color-#{$i} {
-		background: list.nth($wpbs-booking-colors, $i + 1);
+	.wpbs-calendar-legend .wpbs-booking-color-#{$i},
+	.meh-calendar-booking.wpbs-booking-color-#{$i}:not(.meh-calendar-placeholder) {
+		background: $wpbs-color;
+	}
+
+	/* A placeholder keeps its hatch and its dashed outline — that is what marks
+	   it as not a booking — and takes the calendar's colour on the outline and
+	   the text rather than on the fill. Its own `background` is left alone
+	   rather than restated here, which is why the rule above excludes it. */
+	.meh-calendar-placeholder.wpbs-booking-color-#{$i} {
+		border-color: $wpbs-color;
+		color: $wpbs-color;
 	}
 }
 

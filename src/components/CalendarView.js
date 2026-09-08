@@ -155,9 +155,19 @@ export default function CalendarView() {
 					{ calendars.length === 0 && (
 						<p>{ __( 'No calendars found.', 'marthrown-enquiry-hub' ) }</p>
 					) }
-					{ calendars.map( ( cal ) => {
+					{ calendars.map( ( cal, calIndex ) => {
 						const lanes = assignLanes( cal.bookings, month, days );
 						const placeholders = cal.placeholders || [];
+						// The same ten WPBS booking colours the Bookings Manager
+						// uses, taken the same way: by the calendar's position in
+						// the calendar list. `GET /calendar` and `GET /calendars`
+						// both build that list from `SourceWpbs::calendar_names()`
+						// in one order, so a calendar keeps its colour across the
+						// two views. `cal.color` is not used: it is the calendar's
+						// *default legend* colour, identical for every calendar
+						// WPBS created with its stock legend, which is what left
+						// every bar here the same shade.
+						const colorClass = `wpbs-booking-color-${ calIndex % 10 }`;
 						return (
 							<div key={ cal.id } className="meh-calendar-row">
 								<div className="meh-calendar-rowhead">
@@ -199,18 +209,11 @@ export default function CalendarView() {
 											} }
 										>
 											<span
-												className="meh-calendar-booking meh-calendar-placeholder"
+												className={ `meh-calendar-booking meh-calendar-placeholder ${ colorClass }` }
 												style={ {
 													gridColumn: `${ p.start_day } / ${
 														p.end_day + 1
 													}`,
-													...( p.color
-														? {
-																borderColor:
-																	p.color,
-																color: p.color,
-														  }
-														: {} ),
 												} }
 												title={ `${ __(
 													'Placeholder',
@@ -240,18 +243,11 @@ export default function CalendarView() {
 													rel="noopener noreferrer"
 													className={ `meh-calendar-booking meh-cal-status-${
 														item.booking.status
-													}` }
+													} ${ colorClass }` }
 													style={ {
 														gridColumn: `${ item.startDay } / ${
 															item.endDay + 1
 														}`,
-														...( item.booking.color
-															? {
-																	backgroundColor:
-																		item.booking
-																			.color,
-															  }
-															: {} ),
 													} }
 													title={ sprintf(
 														/* translators: 1: id 2: guest 3: start 4: end */
