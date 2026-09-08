@@ -92,9 +92,25 @@ const STATUS_LABELS = {
 const CLOSED = 'closed';
 
 /**
- * How many days the booking-date control will offer (see `candidateDays()`).
+ * The booking-dates choice standing for "not one of the candidate ranges".
  */
-const MAX_BOOKING_DAYS = 90;
+const CUSTOM_RANGE = 'custom';
+
+/**
+ * A booking range with neither bound set, which is what the custom choice starts
+ * from before anything is typed into it.
+ */
+const EMPTY_RANGE = { start: '', end: '' };
+
+/**
+ * The Site Exclusivity term that names no calendar.
+ *
+ * "None" is the absence of exclusivity rather than a part of the site, so an
+ * enquiry holding it constrains the calendar choice to nothing and every
+ * calendar stays offered. Matched on the normalised term, so it catches "none"
+ * however it was cased or spaced.
+ */
+const EXCLUSIVITY_NONE = 'none';
 
 /**
  * Labels for the stored values the summary lists.
@@ -138,7 +154,14 @@ export default function EnquiryDetail( {
 	const [ note, setNote ] = useState( '' );
 	const [ calendars, setCalendars ] = useState( [] );
 	const [ calendar, setCalendar ] = useState( '' );
-	const [ chosen, setChosen ] = useState( '' );
+
+	// Which booking range the convert control is on, and the range being typed
+	// when that choice is the custom one. `picked` empty means nothing has been
+	// chosen yet, which is not the same as having chosen the ideal range: the
+	// default follows whatever the enquiry's ideal range currently is, including
+	// after an edit changes it, and only an actual choice overrides it.
+	const [ picked, setPicked ] = useState( '' );
+	const [ custom, setCustom ] = useState( EMPTY_RANGE );
 
 	// The transition awaiting its comment, and the comment being written. The
 	// target status doubles as the modal's open flag: there is no state in which
@@ -218,11 +241,34 @@ export default function EnquiryDetail( {
 	const isClosed = CLOSED === status;
 	const transitions = list( enquiry && enquiry.allowed_transitions );
 	const ranges = list( enquiry && enquiry.date_ranges );
-	// A booking is one day, so the control offers the days the ranges cover
-	// rather than the ranges themselves.
-	const dates = candidateDays( ranges );
 	const bookingId = enquiry ? Number( enquiry.booking_id ) || 0 : 0;
-	const convertible = !! enquiry && ! isClosed && ! bookingId && dates.length > 0;
+	// Candidate ranges are not a condition of converting. They are where the
+	// booking dates come from by default, but the range can be typed instead, and
+	// an enquiry that reached agreement without naming dates on the form is
+	// exactly the one a custom range exists for.
+	const convertible = !! enquiry && ! isClosed && ! bookingId;
+
+	// Which booking range is in force: the choice made, or the ideal candidate
+	// range until one is. A choice naming a range the enquiry no longer holds —
+	// an edit dropped it — falls back to the custom range, so the control shows
+	// blank bounds and refuses to convert rather than booking a range that has
+	// gone.
+	const choice =
+		'' !== picked ? picked : ranges.length > 0 ? '0' : CUSTOM_RANGE;
+	const booking =
+		CUSTOM_RANGE === choice ? custom : ranges[ Number( choice ) ] || custom;
+	const bookingStart = text( booking && booking.start );
+	const bookingEnd = text( booking && booking.end );
+	const rangeFault = bookingFault( bookingStart, bookingEnd );
+
+	// The calendars this enquiry may be booked onto: the one its Site Exclusivity
+	// names, and no other. Reduced to a string so the effect that keeps the
+	// selection valid depends on the identifiers rather than on a fresh array.
+	const bookable = bookableCalendars(
+		calendars,
+		list( enquiry && enquiry.site_exclusivity )
+	);
+	const bookableIds = bookable.map( ( item ) => String( item.id ) ).join( ',' );
 
 	// The convert control needs the calendars, and nothing else here does, so
 	// they are read only when it is offered.
@@ -240,12 +286,10 @@ export default function EnquiryDetail( {
 					return;
 				}
 
-				const available = list( response && response.calendars );
-				setCalendars( available );
-
-				if ( available.length > 0 ) {
-					setCalendar( String( available[ 0 ].id ) );
-				}
+				// Selecting one is left to the effect below: which calendar this
+				// enquiry may use depends on its Site Exclusivity, not on the
+				// order WPBS happens to return them in.
+				setCalendars( list( response && response.calendars ) );
 			} )
 			.catch( () => {
 				if ( live ) {
@@ -257,6 +301,26 @@ export default function EnquiryDetail( {
 			live = false;
 		};
 	}, [ convertible ] );
+
+	// Hold the selection on a calendar the enquiry's Site Exclusivity allows.
+	// Nothing else selects one, so this is also what preselects it: with a single
+	// allowed calendar — the ordinary case — the choice is made and the control
+	// has nothing to ask.
+	useEffect( () => {
+		const ids = '' === bookableIds ? [] : bookableIds.split( ',' );
+
+		setCalendar( ( current ) =>
+			ids.includes( current ) ? current : ids[ 0 ] || ''
+		);
+	}, [ bookableIds ] );
+
+	// A booking choice belongs to the enquiry it was made on. Moving the panel to
+	// another enquiry starts from that enquiry's own ideal range rather than
+	// carrying the previous one's dates into a conversion.
+	useEffect( () => {
+		setPicked( '' );
+		setCustom( EMPTY_RANGE );
+	}, [ enquiryId ] );
 
 	/**
 	 * Run one write, then read the enquiry back.
@@ -333,6 +397,40 @@ export default function EnquiryDetail( {
 			() => setEnquiryStatus( enquiryId, target, written ),
 			( result ) => statusNotice( target, result )
 		)();
+	};
+
+	/**
+	 * Take the booking dates from one candidate range, or start editing them.
+	 *
+	 * Choosing the custom entry carries the dates already showing into the
+	 * editable pair rather than blanking them: a custom range is usually a
+	 * candidate range with a day moved, so it starts from the one on screen.
+	 *
+	 * @param {string} value Candidate range index, or `CUSTOM_RANGE`.
+	 */
+	const chooseRange = ( value ) => {
+		if ( CUSTOM_RANGE === value ) {
+			setCustom( { start: bookingStart, end: bookingEnd } );
+		}
+
+		setPicked( value );
+	};
+
+	/**
+	 * Edit one bound of the booking range.
+	 *
+	 * The edited pair is matched back against the candidate ranges, so typing a
+	 * candidate range's dates by hand leaves the control naming that candidate
+	 * rather than reporting a custom range identical to one.
+	 *
+	 * @param {string} bound `start` or `end`.
+	 * @param {string} value The date typed, `YYYY-MM-DD`, or empty.
+	 */
+	const editBound = ( bound, value ) => {
+		const edited = { start: bookingStart, end: bookingEnd, [ bound ]: value };
+
+		setCustom( edited );
+		setPicked( rangeChoice( ranges, edited ) );
 	};
 
 	const onSaved = ( saved ) => {
@@ -554,37 +652,112 @@ export default function EnquiryDetail( {
 									'marthrown-enquiry-hub'
 								) }
 								value={ calendar }
-								options={ calendars.map( ( item ) => ( {
+								options={ bookable.map( ( item ) => ( {
 									label: item.name,
 									value: String( item.id ),
 								} ) ) }
 								onChange={ setCalendar }
+								// One allowed calendar is not a choice, so it is
+								// shown rather than asked. The disabled control
+								// still names the calendar the booking will be
+								// made on, which a bare line of text beside a
+								// hidden decision would not.
+								disabled={ bookable.length < 2 }
+								help={ calendarHelp(
+									calendars,
+									list( enquiry.site_exclusivity )
+								) }
 								__nextHasNoMarginBottom
 							/>
 							<SelectControl
 								label={ __(
-									'Booking date',
+									'Booking dates',
 									'marthrown-enquiry-hub'
 								) }
-								value={ chosen || dates[ 0 ] }
-								options={ dates.map( ( date ) => ( {
-									label: date,
-									value: date,
-								} ) ) }
-								onChange={ setChosen }
+								value={ choice }
+								options={ [
+									...ranges.map( ( range, index ) => ( {
+										label: sprintf(
+											/* translators: 1: rank of the candidate range, 2: the range itself. */
+											__(
+												'%1$s: %2$s',
+												'marthrown-enquiry-hub'
+											),
+											rankLabel( index ),
+											rangeText( range )
+										),
+										value: String( index ),
+									} ) ),
+									{
+										label: __(
+											'Custom range…',
+											'marthrown-enquiry-hub'
+										),
+										value: CUSTOM_RANGE,
+									},
+								] }
+								onChange={ chooseRange }
 								__nextHasNoMarginBottom
 							/>
+							{ /* The bounds the chosen range maps to, and the one
+							     place they are edited. Shown for a candidate range
+							     as well as a custom one: the dates that will be
+							     booked are worth seeing before the button is
+							     pressed, and a day moved by agreement is edited
+							     here rather than by re-typing the whole range. */ }
+							<div className="meh-detail__convert-dates">
+								<label className="meh-date-label">
+									{ __(
+										'Start date',
+										'marthrown-enquiry-hub'
+									) }
+									<input
+										type="date"
+										value={ bookingStart }
+										onChange={ ( event ) =>
+											editBound(
+												'start',
+												event.target.value
+											)
+										}
+									/>
+								</label>
+								<label className="meh-date-label">
+									{ __(
+										'End date',
+										'marthrown-enquiry-hub'
+									) }
+									<input
+										type="date"
+										value={ bookingEnd }
+										onChange={ ( event ) =>
+											editBound(
+												'end',
+												event.target.value
+											)
+										}
+									/>
+								</label>
+							</div>
+							{ '' !== rangeFault && (
+								<p className="meh-detail__convert-fault">
+									{ rangeFault }
+								</p>
+							) }
 							<button
 								type="button"
 								className="button"
-								disabled={ !! busy || ! calendar }
+								disabled={
+									!! busy || ! calendar || '' !== rangeFault
+								}
 								onClick={ run(
 									'convert',
 									() =>
 										convertEnquiry(
 											enquiryId,
 											Number( calendar ),
-											chosen || dates[ 0 ]
+											bookingStart,
+											bookingEnd || bookingStart
 										),
 									() =>
 										__(
@@ -1256,66 +1429,173 @@ function rankLabel( index ) {
 }
 
 /**
- * Every day the candidate ranges cover, in preference order.
+ * Which entry of the booking-dates control a pair of bounds is.
  *
- * The booking a conversion creates is a single day (Requirement 14.2), so the
- * date control offers days rather than ranges; the ideal range's days come
- * first, so the default choice is the first day of the range the enquirer would
- * rather have. Days named by more than one range appear once.
+ * A pair matching a candidate range is that candidate, however it came to be
+ * typed. Anything else is the custom range.
  *
- * The total is capped because a dropdown of several hundred dates is not a
- * control anyone can use, and because a range of any length is a legal thing for
- * an enquirer to have asked for. A day past the cap is still bookable — the
- * server's own check is against the ranges, not this list — it just is not
- * offered here.
- *
- * @param {Array} ranges Ranges as the API returns them.
- * @return {string[]} Days as `YYYY-MM-DD`.
+ * @param {Array}  ranges Candidate ranges as the API returns them.
+ * @param {Object} range  The bounds in force.
+ * @return {string} Range index as a string, or `CUSTOM_RANGE`.
  */
-function candidateDays( ranges ) {
-	const days = [];
-	const seen = {};
+function rangeChoice( ranges, range ) {
+	const found = ranges.findIndex(
+		( item ) =>
+			text( item && item.start ) === range.start &&
+			text( item && item.end ) === range.end
+	);
 
-	ranges.forEach( ( range ) => {
-		expandRange( range ).forEach( ( day ) => {
-			if ( ! seen[ day ] && days.length < MAX_BOOKING_DAYS ) {
-				seen[ day ] = true;
-				days.push( day );
-			}
-		} );
-	} );
-
-	return days;
+	return found < 0 ? CUSTOM_RANGE : String( found );
 }
 
 /**
- * One range as the days it covers, inclusive of both bounds.
+ * What is wrong with the booking range, if anything.
  *
- * Iterated in UTC so a day is neither skipped nor repeated across a daylight
- * saving transition. A range whose bounds do not parse, or which ends before it
- * starts, yields nothing: the store does not hold such a range, and inventing
- * days for one would offer a booking date nobody named.
+ * The route refuses all three of these itself, so this is not the check that
+ * protects the data — it is the one that says so before the request rather than
+ * after it, next to the control that would fix it. An empty end date is not a
+ * fault: it is the single-day booking, and the start date stands for both bounds.
  *
- * @param {Object} range Range as the API returns it.
- * @return {string[]} Days as `YYYY-MM-DD`.
+ * @param {string} start First day.
+ * @param {string} end   Last day, possibly empty.
+ * @return {string} Fault text, empty when the range is bookable.
  */
-function expandRange( range ) {
-	const start = parseIsoDate( range && range.start );
-	const end = parseIsoDate( range && range.end );
+function bookingFault( start, end ) {
+	if ( ! parseIsoDate( start ) ) {
+		return __(
+			'A booking needs a start date.',
+			'marthrown-enquiry-hub'
+		);
+	}
 
-	if ( ! start || ! end || end < start ) {
+	if ( '' !== end && ! parseIsoDate( end ) ) {
+		return __(
+			'The end date is not a calendar date.',
+			'marthrown-enquiry-hub'
+		);
+	}
+
+	if ( '' !== end && end < start ) {
+		return __(
+			'The end date falls before the start date.',
+			'marthrown-enquiry-hub'
+		);
+	}
+
+	return '';
+}
+
+/**
+ * A calendar or exclusivity name reduced to what a comparison should turn on.
+ *
+ * Case, spacing and punctuation are all dropped, because the two vocabularies are
+ * maintained in different places — the exclusivity terms in the plugin, the
+ * calendar names in WP Booking System — and neither is going to be typed to match
+ * the other exactly.
+ *
+ * @param {*} raw Name.
+ * @return {string} Comparison key.
+ */
+function calendarKey( raw ) {
+	return text( raw )
+		.toLowerCase()
+		.replace( /[^a-z0-9]+/g, '' );
+}
+
+/**
+ * The exclusivity terms that name a part of the site.
+ *
+ * @param {Array} exclusivity Stored `site_exclusivity`.
+ * @return {string[]} Comparison keys.
+ */
+function exclusivityTerms( exclusivity ) {
+	return exclusivity
+		.map( calendarKey )
+		.filter( ( term ) => '' !== term && EXCLUSIVITY_NONE !== term );
+}
+
+/**
+ * The calendars the enquiry's Site Exclusivity names.
+ *
+ * Matched on the calendar name beginning with the term, which is what lets "Top
+ * Site" find the calendar called "Top Site (Festival)": the calendar name says
+ * which part of the site it is and then what it is for, and only the first half
+ * is the exclusivity. Nothing here works the other way round — a term is never
+ * matched against part of itself — so "Full Site" cannot be answered by a
+ * calendar called "Full".
+ *
+ * @param {Array} calendars   Calendars as the API returns them.
+ * @param {Array} exclusivity Stored `site_exclusivity`.
+ * @return {Array} The matching calendars, empty when none match.
+ */
+function matchedCalendars( calendars, exclusivity ) {
+	const wanted = exclusivityTerms( exclusivity );
+
+	if ( 0 === wanted.length ) {
 		return [];
 	}
 
-	const days = [];
-	const cursor = new Date( start );
+	return calendars.filter( ( item ) => {
+		const name = calendarKey( item && item.name );
 
-	while ( cursor <= end && days.length <= MAX_BOOKING_DAYS ) {
-		days.push( cursor.toISOString().slice( 0, 10 ) );
-		cursor.setUTCDate( cursor.getUTCDate() + 1 );
+		return (
+			'' !== name && wanted.some( ( term ) => name.startsWith( term ) )
+		);
+	} );
+}
+
+/**
+ * The calendars a booking for this enquiry may be created on.
+ *
+ * The enquiry's Site Exclusivity decides it: an enquiry for the top site is
+ * booked on the top site's calendar and on no other, so the control offers that
+ * one alone rather than leaving the match to be made by hand every time.
+ *
+ * Where the exclusivity names no calendar — it is "None", it is unset, or no
+ * calendar carries a matching name — every calendar stays offered. A conversion
+ * is a booking the team has already agreed with the guest; the alternative to
+ * offering all of them is offering none, which would leave the enquiry
+ * unconvertible over a naming mismatch nobody looking at this panel can fix.
+ *
+ * @param {Array} calendars   Calendars as the API returns them.
+ * @param {Array} exclusivity Stored `site_exclusivity`.
+ * @return {Array} Calendars to offer.
+ */
+function bookableCalendars( calendars, exclusivity ) {
+	const matched = matchedCalendars( calendars, exclusivity );
+
+	return matched.length > 0 ? matched : calendars;
+}
+
+/**
+ * Why the calendar control offers what it offers.
+ *
+ * Said out loud in both of the cases where the offer is not simply "the
+ * calendars": one calendar because the exclusivity fixed it, and all of them
+ * because the exclusivity matched nothing. The second is the one worth reading —
+ * it is the only sign a calendar has been renamed out of reach of the match.
+ *
+ * @param {Array} calendars   Calendars as the API returns them.
+ * @param {Array} exclusivity Stored `site_exclusivity`.
+ * @return {string} Help text, empty when there is nothing to explain.
+ */
+function calendarHelp( calendars, exclusivity ) {
+	if ( 0 === calendars.length || 0 === exclusivityTerms( exclusivity ).length ) {
+		return '';
 	}
 
-	return days;
+	if ( 0 === matchedCalendars( calendars, exclusivity ).length ) {
+		return __(
+			'No calendar matches the site exclusivity asked for, so every calendar is offered.',
+			'marthrown-enquiry-hub'
+		);
+	}
+
+	return sprintf(
+		/* translators: %s: the enquiry's site exclusivity. */
+		__( 'Set by the site exclusivity: %s.', 'marthrown-enquiry-hub' ),
+		exclusivity.map( text ).join( ', ' )
+	);
 }
 
 /**

@@ -4,18 +4,25 @@
  *
  * Feature: enquiry-data-layer, Property 33: For any enquiry that is not closed
  * and holds no booking identifier, any WP Booking System calendar known to the
- * plugin, and any candidate date belonging to that enquiry, conversion creates
- * one booking whose start and end date equal the chosen date and whose guest
+ * plugin, and any date range that ends no earlier than it starts, conversion
+ * creates one booking whose start and end date equal that range and whose guest
  * name and email derive from the enquiry's `first_name`, `last_name` and
- * `email`, blocks that date on the target calendar using that calendar's booked
- * legend item, records the resulting booking identifier on the enquiry,
- * transitions the enquiry to `converted`, appends one history entry of type
- * `booking_linked` holding the booking identifier, and triggers no WP Booking
- * System email, payment, pricing or inventory operation.
+ * `email`, blocks every day of that range on the target calendar using that
+ * calendar's booked legend item, records the resulting booking identifier on the
+ * enquiry, transitions the enquiry to `converted`, appends one history entry of
+ * type `booking_linked` holding the booking identifier, and triggers no WP
+ * Booking System email, payment, pricing or inventory operation.
  *
  * **Validates: Requirements 14.2, 14.3, 14.4, 14.5, 14.6, 14.7, 14.11**
  *
- * Four notes on how the property is instantiated:
+ * Five notes on how the property is instantiated:
+ *
+ * - The booked range is drawn two ways: one of the enquiry's own candidate
+ *   ranges, and a range beyond all of them. Both are quantified over because the
+ *   candidate ranges are the choices the hub's date control offers rather than a
+ *   constraint on what may be booked — dates agreed on the telephone routinely
+ *   land outside anything typed into the form — so a conversion that refused the
+ *   second would be refusing the case the custom range exists for.
  *
  * - It runs against real tables at its own prefix segment, because the claim is
  *   about what conversion *stored*: `booking_id` on the enquiry row, the status
@@ -191,20 +198,25 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 					$this->reset_state();
 
 					$calendar_id = $this->seed_calendar( $scenario['calendar'] );
-					$chosen      = self::chosen_date( $scenario );
+					$range       = self::booked_range( $scenario );
 					$enquiry_id  = $this->seed_enquiry( $scenario );
 
-					$result = BookingCreator::create_from_enquiry( $enquiry_id, $calendar_id, $chosen );
+					$result = BookingCreator::create_from_enquiry(
+						$enquiry_id,
+						$calendar_id,
+						$range['start'],
+						$range['end']
+					);
 
 					$this->assertIsArray(
 						$result,
-						'Conversion of an open, unbooked enquiry to a known calendar on one of its own candidate dates should succeed.'
+						'Conversion of an open, unbooked enquiry to a known calendar over a forward-running date range should succeed.'
 					);
 					$this->assertSame( array(), $result['warnings'], 'A successful conversion should report no warning.' );
 
-					$this->assert_one_booking_was_created( $result, $scenario, $calendar_id, $chosen );
-					$this->assert_the_date_was_blocked( $result, $scenario, $calendar_id, $chosen );
-					$this->assert_the_enquiry_records_the_booking( $result, $enquiry_id, $chosen );
+					$this->assert_one_booking_was_created( $result, $scenario, $calendar_id, $range );
+					$this->assert_the_range_was_blocked( $result, $scenario, $calendar_id, $range );
+					$this->assert_the_enquiry_records_the_booking( $result, $enquiry_id, $range );
 					$this->assert_no_wpbs_form_flow_ran();
 				}
 			);
@@ -215,16 +227,16 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 	 * ------------------------------------------------------------------ */
 
 	/**
-	 * Exactly one booking, on the target calendar, for the chosen day, carrying
+	 * Exactly one booking, on the target calendar, over the agreed range, carrying
 	 * the enquirer's name and email (Requirements 14.2, 14.3).
 	 *
-	 * @param array  $result      What conversion returned.
-	 * @param array  $scenario    The generated scenario.
-	 * @param int    $calendar_id Target calendar.
-	 * @param string $chosen      Chosen candidate date, `Y-m-d`.
+	 * @param array $result      What conversion returned.
+	 * @param array $scenario    The generated scenario.
+	 * @param int   $calendar_id Target calendar.
+	 * @param array $range       The booked range, `array{start:string,end:string}`.
 	 * @return void
 	 */
-	private function assert_one_booking_was_created( array $result, array $scenario, $calendar_id, $chosen ) {
+	private function assert_one_booking_was_created( array $result, array $scenario, $calendar_id, array $range ) {
 		$this->assertCount( 1, $this->wpbs->bookings(), 'Conversion should create exactly one booking.' );
 		$this->assertSame( 1, $this->wpbs->call_count( 'wpbs_insert_booking' ), 'Conversion should insert one booking, once.' );
 
@@ -233,9 +245,11 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 		$this->assertIsArray( $booking, 'The reported booking identifier should name the created booking.' );
 		$this->assertSame( (int) $calendar_id, (int) $booking['calendar_id'], 'The booking should sit on the target calendar.' );
 
-		// Requirement 14.2: a single day, start and end both the chosen date.
-		$this->assertSame( $chosen, (string) $booking['start_date'], 'The booking should start on the chosen candidate date.' );
-		$this->assertSame( $chosen, (string) $booking['end_date'], 'The booking should end on the chosen candidate date.' );
+		// Requirement 14.2: the booking runs from the first day agreed to the last.
+		$this->assertSame( $range['start'], (string) $booking['start_date'], 'The booking should start on the first day of the agreed range.' );
+		$this->assertSame( $range['end'], (string) $booking['end_date'], 'The booking should end on the last day of the agreed range.' );
+		$this->assertSame( $range['start'], (string) $result['start_date'], 'Conversion should report the first day it booked.' );
+		$this->assertSame( $range['end'], (string) $result['end_date'], 'Conversion should report the last day it booked.' );
 
 		// Requirement 14.3.
 		$this->assertSame(
@@ -251,50 +265,57 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * One blocked day, on the target calendar, using that calendar's own `booked`
-	 * legend item (Requirement 14.4).
+	 * Every day of the agreed range blocked, on the target calendar, using that
+	 * calendar's own `booked` legend item (Requirement 14.4).
 	 *
-	 * @param array  $result      What conversion returned.
-	 * @param array  $scenario    The generated scenario.
-	 * @param int    $calendar_id Target calendar.
-	 * @param string $chosen      Chosen candidate date, `Y-m-d`.
+	 * A range is blocked day by day rather than as a span, so the claim is about
+	 * the whole set: as many events as the range has days, each one of its days,
+	 * none of them a day outside it, and none belonging to another booking.
+	 *
+	 * @param array $result      What conversion returned.
+	 * @param array $scenario    The generated scenario.
+	 * @param int   $calendar_id Target calendar.
+	 * @param array $range       The booked range, `array{start:string,end:string}`.
 	 * @return void
 	 */
-	private function assert_the_date_was_blocked( array $result, array $scenario, $calendar_id, $chosen ) {
-		$this->assertSame( 1, (int) $result['blocked'], 'Conversion should block exactly the one chosen day.' );
+	private function assert_the_range_was_blocked( array $result, array $scenario, $calendar_id, array $range ) {
+		$expected = Generators::days_in_ranges( array( $range ) );
+		$events   = $this->wpbs->events_for( $result['booking_id'] );
 
-		$events = $this->wpbs->events_for( $result['booking_id'] );
-
-		$this->assertCount( 1, $events, 'A single-day booking should block a single day.' );
+		$this->assertSame(
+			count( $expected ),
+			(int) $result['blocked'],
+			'Conversion should block exactly as many days as the agreed range covers.'
+		);
+		$this->assertCount( count( $expected ), $events, 'The booking should hold one blocked day per day of its range.' );
 		$this->assertSame( $events, $this->wpbs->events(), 'No day should be blocked for any other booking.' );
 
-		$this->assertSame( (int) $calendar_id, (int) $events[0]['calendar_id'], 'The day should be blocked on the target calendar.' );
-		$this->assertSame(
-			self::expected_legend_id( $scenario ),
-			(int) $events[0]['legend_item_id'],
-			'The day should be blocked with the target calendar own booked legend item.'
-		);
-		$this->assertSame(
-			self::date_parts( $chosen ),
-			array(
-				(int) $events[0]['date_year'],
-				(int) $events[0]['date_month'],
-				(int) $events[0]['date_day'],
-			),
-			'The blocked day should be the chosen candidate date.'
-		);
+		$blocked = array();
+
+		foreach ( $events as $event ) {
+			$this->assertSame( (int) $calendar_id, (int) $event['calendar_id'], 'Each day should be blocked on the target calendar.' );
+			$this->assertSame(
+				self::expected_legend_id( $scenario ),
+				(int) $event['legend_item_id'],
+				'Each day should be blocked with the target calendar own booked legend item.'
+			);
+
+			$blocked[] = sprintf( '%04d-%02d-%02d', (int) $event['date_year'], (int) $event['date_month'], (int) $event['date_day'] );
+		}
+
+		$this->assertSame( $expected, $blocked, 'The blocked days should be every day of the agreed range, in order.' );
 	}
 
 	/**
 	 * The enquiry records the booking, moves to `converted`, and carries one
 	 * `booking_linked` entry naming that booking (Requirements 14.5, 14.6, 14.7).
 	 *
-	 * @param array  $result     What conversion returned.
-	 * @param int    $enquiry_id Converted enquiry.
-	 * @param string $chosen     Chosen candidate date, `Y-m-d`.
+	 * @param array $result     What conversion returned.
+	 * @param int   $enquiry_id Converted enquiry.
+	 * @param array $range      The booked range, `array{start:string,end:string}`.
 	 * @return void
 	 */
-	private function assert_the_enquiry_records_the_booking( array $result, $enquiry_id, $chosen ) {
+	private function assert_the_enquiry_records_the_booking( array $result, $enquiry_id, array $range ) {
 		$enquiry = EnquiryStore::find( $enquiry_id );
 
 		$this->assertIsArray( $enquiry, 'The converted enquiry should read back.' );
@@ -326,7 +347,11 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 			(int) $linked[0]['context']['booking_id'],
 			'The booking_linked entry should hold the booking identifier.'
 		);
-		$this->assertSame( $chosen, (string) $linked[0]['context']['date'], 'The booking_linked entry should hold the booked date.' );
+		$this->assertSame(
+			array( $range['start'], $range['end'] ),
+			array( (string) $linked[0]['context']['start_date'], (string) $linked[0]['context']['end_date'] ),
+			'The booking_linked entry should hold the range that was booked.'
+		);
 	}
 
 	/**
@@ -367,22 +392,43 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 
 	/**
 	 * One conversion: the enquiry to convert, the calendar to convert onto, and
-	 * which day of the enquiry's candidate ranges was agreed.
+	 * the range that was agreed.
 	 *
 	 * @return \Eris\Generator
 	 */
 	protected static function scenario() {
 		return \Eris\Generators::associative(
 			array(
-				'first_name'   => Generators::first_name(),
-				'last_name'    => Generators::last_name(),
-				'email'        => Generators::email(),
-				'ranges'       => Generators::candidate_ranges(),
-				// Reduced against the number of days the drawn ranges cover, so
-				// every candidate day is reachable whatever those ranges are.
-				'chosen_index' => \Eris\Generators::choose( 0, 60 ),
-				'status'       => \Eris\Generators::elements( self::CONVERTIBLE_STATUSES ),
-				'calendar'     => self::calendar(),
+				'first_name' => Generators::first_name(),
+				'last_name'  => Generators::last_name(),
+				'email'      => Generators::email(),
+				'ranges'     => Generators::candidate_ranges(),
+				'booked'     => self::booked(),
+				'status'     => \Eris\Generators::elements( self::CONVERTIBLE_STATUSES ),
+				'calendar'   => self::calendar(),
+			)
+		);
+	}
+
+	/**
+	 * The range that was agreed: one of the enquiry's own candidate ranges, or one
+	 * beyond all of them.
+	 *
+	 * `index` is reduced against the number of ranges drawn, so every candidate
+	 * range is reachable whatever that number is. The custom range starts a drawn
+	 * number of days after the last candidate day, so it cannot overlap anything
+	 * the enquiry offered, and its span is kept small because every day of it is
+	 * blocked one insert at a time.
+	 *
+	 * @return \Eris\Generator
+	 */
+	protected static function booked() {
+		return \Eris\Generators::associative(
+			array(
+				'mode'  => \Eris\Generators::elements( array( 'candidate', 'custom' ) ),
+				'index' => \Eris\Generators::choose( 0, 60 ),
+				'shift' => \Eris\Generators::choose( 1, 120 ),
+				'span'  => \Eris\Generators::choose( 0, 5 ),
 			)
 		);
 	}
@@ -503,19 +549,38 @@ class BookingConversionPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The candidate date the team agreed, drawn from the days the enquiry's own
-	 * ranges cover.
+	 * The range the team agreed: one the enquirer offered, or one they did not.
 	 *
-	 * A booking is a single day, so the agreed date is a day inside a range
-	 * rather than a range: any day of any of them is one the enquirer offered.
+	 * The candidate ranges are the choices the hub's date control puts in front of
+	 * the user, not a limit on what may be booked, so the custom mode is the case
+	 * of a range settled on the telephone — placed past the last candidate day, so
+	 * that it demonstrably is not one of them.
 	 *
 	 * @param array $scenario The generated scenario.
-	 * @return string `Y-m-d`.
+	 * @return array `array{start:string,end:string}`, both `Y-m-d`.
 	 */
-	private static function chosen_date( array $scenario ) {
-		$days = Generators::days_in_ranges( $scenario['ranges'] );
+	private static function booked_range( array $scenario ) {
+		$booked = $scenario['booked'];
+		$ranges = $scenario['ranges'];
 
-		return (string) $days[ (int) $scenario['chosen_index'] % count( $days ) ];
+		if ( 'candidate' === $booked['mode'] ) {
+			$range = $ranges[ (int) $booked['index'] % count( $ranges ) ];
+
+			return array(
+				'start' => (string) $range['start'],
+				'end'   => (string) $range['end'],
+			);
+		}
+
+		$days  = Generators::days_in_ranges( $ranges );
+		$last  = max( $days );
+		$start = ( new \DateTimeImmutable( $last, new \DateTimeZone( 'UTC' ) ) )
+			->modify( sprintf( '+%d days', (int) $booked['shift'] ) );
+
+		return array(
+			'start' => $start->format( 'Y-m-d' ),
+			'end'   => $start->modify( sprintf( '+%d days', (int) $booked['span'] ) )->format( 'Y-m-d' ),
+		);
 	}
 
 	/**

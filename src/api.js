@@ -134,16 +134,27 @@ export function duplicateEnquiry( id ) {
 /**
  * Create a WP Booking System booking from an enquiry (Requirement 14.1).
  *
+ * `endDate` is sent only when it differs from the first day: the route treats an
+ * absent one as a single-day booking, so a one-day range is written the short way
+ * rather than as the same date twice.
+ *
  * @param {number} id         Enquiry id.
  * @param {number} calendarId Target calendar id.
- * @param {string} date       The chosen candidate date (Y-m-d).
+ * @param {string} date       First day of the booking (Y-m-d).
+ * @param {string} [endDate]  Last day of the booking (Y-m-d).
  * @return {Promise<Object>} The enquiry, with `booking`.
  */
-export function convertEnquiry( id, calendarId, date ) {
+export function convertEnquiry( id, calendarId, date, endDate = '' ) {
+	const data = { calendar_id: calendarId, date };
+
+	if ( endDate && endDate !== date ) {
+		data.end_date = endDate;
+	}
+
 	return apiFetch( {
 		path: `enquiries/${ id }/convert`,
 		method: 'POST',
-		data: { calendar_id: calendarId, date },
+		data,
 	} );
 }
 

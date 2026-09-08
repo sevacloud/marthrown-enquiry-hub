@@ -6,7 +6,8 @@
  * enquiries; what is asserted here is one worked example of each outcome against
  * real rows and a recording WPBS fake: the happy path inserting one booking,
  * blocking one day with the calendar's own `booked` legend item, recording
- * `booking_id`, appending `booking_linked` and transitioning to `converted`;
+ * `booking_id`, appending `booking_linked` and transitioning to `converted`; a
+ * multi-day booking on a range the enquirer never offered, blocked day by day;
  * each guard refusing with its documented status and leaving nothing behind; a
  * second conversion refused; a calendar with no `booked` legend item keeping the
  * booking and warning; and the staging copy prefixing the guest name.
@@ -115,12 +116,14 @@ class BookingCreatorTest extends WP_UnitTestCase {
 		$this->assertIsArray( $result, 'Conversion should succeed.' );
 		$this->assertSame( array(), $result['warnings'] );
 		$this->assertGreaterThan( 0, $result['booking_id'] );
-		$this->assertSame( '2025-08-16', $result['date'] );
+		$this->assertSame( '2025-08-16', $result['start_date'] );
+		$this->assertSame( '2025-08-16', $result['end_date'] );
 		$this->assertStringContainsString( 'booking_id=' . $result['booking_id'], $result['edit_url'] );
 
 		$booking = $this->wpbs->booking( $result['booking_id'] );
 
-		// Requirement 14.2: start and end are both the chosen candidate date.
+		// Requirement 14.2: an omitted end date is the single-day booking, so both
+		// bounds are the one date given.
 		$this->assertSame( 1, (int) $booking['calendar_id'] );
 		$this->assertSame( '2025-08-16', $booking['start_date'] );
 		$this->assertSame( '2025-08-16', $booking['end_date'] );
@@ -160,7 +163,60 @@ class BookingCreatorTest extends WP_UnitTestCase {
 
 		$this->assertCount( 1, $linked );
 		$this->assertSame( $result['booking_id'], (int) $linked[0]['context']['booking_id'] );
-		$this->assertSame( '2025-08-16', $linked[0]['context']['date'] );
+		$this->assertSame( '2025-08-16', $linked[0]['context']['start_date'] );
+		$this->assertSame( '2025-08-16', $linked[0]['context']['end_date'] );
+		$this->assertStringContainsString( 'for 2025-08-16.', $linked[0]['description'] );
+	}
+
+	/**
+	 * A booking over several days, on a range the enquirer never offered.
+	 *
+	 * The candidate ranges are the choices the hub's own control puts in front of
+	 * the user; they are not a constraint on what may be booked, because the team
+	 * routinely agrees dates by telephone that nobody typed into the form. So the
+	 * range that is asked for is the range that is booked, every day of it is
+	 * blocked, and the history entry says which range it was.
+	 *
+	 * @return void
+	 */
+	public function test_a_range_outside_the_candidates_is_booked_in_full() {
+		$id = $this->seed_enquiry();
+
+		$result = BookingCreator::create_from_enquiry( $id, 1, '2025-09-01', '2025-09-03' );
+
+		$this->assertIsArray( $result, 'A custom range should convert.' );
+		$this->assertSame( '2025-09-01', $result['start_date'] );
+		$this->assertSame( '2025-09-03', $result['end_date'] );
+
+		$booking = $this->wpbs->booking( $result['booking_id'] );
+
+		$this->assertSame( '2025-09-01', $booking['start_date'] );
+		$this->assertSame( '2025-09-03', $booking['end_date'] );
+
+		// Requirement 14.4: every day of the range, not just the first.
+		$days = array_map(
+			static function ( $event ) {
+				return sprintf( '%04d-%02d-%02d', $event['date_year'], $event['date_month'], $event['date_day'] );
+			},
+			$this->wpbs->events_for( $result['booking_id'] )
+		);
+
+		$this->assertSame( array( '2025-09-01', '2025-09-02', '2025-09-03' ), $days );
+		$this->assertSame( 3, $result['blocked'] );
+
+		$linked = array_values(
+			array_filter(
+				HistoryRecorder::for_enquiry( $id ),
+				static function ( $entry ) {
+					return 'booking_linked' === $entry['entry_type'];
+				}
+			)
+		);
+
+		$this->assertCount( 1, $linked );
+		$this->assertSame( '2025-09-01', $linked[0]['context']['start_date'] );
+		$this->assertSame( '2025-09-03', $linked[0]['context']['end_date'] );
+		$this->assertStringContainsString( 'for 2025-09-01 to 2025-09-03.', $linked[0]['description'] );
 	}
 
 	/**
@@ -177,10 +233,19 @@ class BookingCreatorTest extends WP_UnitTestCase {
 		$this->assertWPError( $bad_calendar );
 		$this->assertSame( 400, $bad_calendar->get_error_data()['status'] );
 
-		// A date the enquirer never offered.
-		$bad_date = BookingCreator::create_from_enquiry( $id, 1, '2025-09-01' );
+		// A value that is not a calendar date. The 30th of February is the case a
+		// general date parser would roll forward into March rather than refuse.
+		$bad_date = BookingCreator::create_from_enquiry( $id, 1, '2025-02-30' );
 		$this->assertWPError( $bad_date );
+		$this->assertSame( 'meh_booking_invalid_date', $bad_date->get_error_code() );
 		$this->assertSame( 400, $bad_date->get_error_data()['status'] );
+
+		// A range ending before it starts names no days, so there is nothing to
+		// book and nothing to block.
+		$backwards = BookingCreator::create_from_enquiry( $id, 1, '2025-08-16', '2025-08-15' );
+		$this->assertWPError( $backwards );
+		$this->assertSame( 'meh_booking_invalid_range', $backwards->get_error_code() );
+		$this->assertSame( 400, $backwards->get_error_data()['status'] );
 
 		// An enquiry that does not exist.
 		$missing = BookingCreator::create_from_enquiry( $id + 5000, 1, '2025-08-16' );

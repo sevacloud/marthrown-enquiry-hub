@@ -882,6 +882,23 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 		border-radius: 4px;
 	}
 
+	/* The two bounds of the booking, kept together as one control: they are a
+	   range, and a wrap between them would read as two unrelated dates. */
+	&__convert-dates {
+		display: flex;
+		align-items: flex-end;
+		gap: 8px;
+	}
+
+	/* Why the button is disabled, said where the button is. Full-width so it sits
+	   under the row of controls rather than squeezing in beside them. */
+	&__convert-fault {
+		flex-basis: 100%;
+		margin: 0;
+		color: #d63638;
+		font-size: 12px;
+	}
+
 	&__grid {
 		display: grid;
 		grid-template-columns: minmax(120px, 180px) 1fr;

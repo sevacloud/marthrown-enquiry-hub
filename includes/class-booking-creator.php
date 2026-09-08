@@ -3,23 +3,32 @@
  * Booking creation from an enquiry.
  *
  * The one path that turns a won enquiry into a real WP Booking System booking
- * (Requirement 14). It takes the target calendar and the date the team agreed,
- * both chosen by a human, and does five things in a fixed order: inserts the
- * booking, blocks the day on that calendar, records the booking identifier
+ * (Requirement 14). It takes the target calendar and the date range the team
+ * agreed, both chosen by a human, and does five things in a fixed order: inserts
+ * the booking, blocks its days on that calendar, records the booking identifier
  * against the enquiry, appends a `booking_linked` history entry and transitions
  * the enquiry to `converted`.
+ *
+ * The booked range is not required to be one of the enquiry's candidate ranges.
+ * The candidate ranges are what the enquirer offered, and the hub's own date
+ * control offers them as the choices; but an agreement reached on the telephone
+ * routinely lands on a range nobody typed into the form — a day either side for
+ * setting up, a week moved to suit another booking — and refusing that would
+ * leave the team creating the booking in WPBS by hand, outside the enquiry it
+ * belongs to. So the dates are checked for being dates, and for ending no
+ * earlier than they start, and the range that is booked is the range the history
+ * entry records.
  *
  * Three decisions shape the class:
  *
  * - **Guards run before any side effect, in a fixed order.** WPBS available
  *   (503), enquiry exists (404), enquiry not closed (409), no existing
- *   `booking_id` (409), calendar known (400), date is one of the enquiry's
- *   candidate dates (400). Every one of them returns before `wpbs_insert_booking()`
- *   is reached, so a rejected request creates no booking, blocks no date and
- *   leaves the enquiry status exactly as it was (Requirements 14.8, 14.9, 14.10).
- *   The order matters: an enquiry that does not exist cannot be tested for a
- *   `booking_id`, and a calendar that does not exist has no candidate-date
- *   question to answer.
+ *   `booking_id` (409), calendar known (400), dates parse and run forwards
+ *   (400). Every one of them returns before `wpbs_insert_booking()` is reached,
+ *   so a rejected request creates no booking, blocks no date and leaves the
+ *   enquiry status exactly as it was (Requirements 14.8, 14.9, 14.10). The order
+ *   matters: an enquiry that does not exist cannot be tested for a `booking_id`,
+ *   and a calendar that does not exist has no dates worth parsing.
  * - **No WPBS form flow is touched.** The booking is inserted through
  *   `wpbs_insert_booking()` and the day blocked through `wpbs_insert_event()`
  *   against the calendar's `booked` legend item, the approach already proven in
@@ -107,10 +116,12 @@ class BookingCreator {
 	 *
 	 * @param int    $enquiry_id  Enquiry to convert.
 	 * @param int    $calendar_id Target WPBS calendar.
-	 * @param string $date        Chosen candidate date, `Y-m-d`.
-	 * @return array{booking_id:int,edit_url:string,calendar_id:int,date:string,blocked:int,warnings:string[]}|\WP_Error
+	 * @param string $start       First day of the booking, `Y-m-d`.
+	 * @param string $end         Last day of the booking, `Y-m-d`. Omitted or
+	 *                            blank means a single-day booking on `$start`.
+	 * @return array{booking_id:int,edit_url:string,calendar_id:int,start_date:string,end_date:string,blocked:int,warnings:string[]}|\WP_Error
 	 */
-	public static function create_from_enquiry( $enquiry_id, $calendar_id, $date ) {
+	public static function create_from_enquiry( $enquiry_id, $calendar_id, $start, $end = null ) {
 		$enquiry_id  = (int) $enquiry_id;
 		$calendar_id = (int) $calendar_id;
 
@@ -159,25 +170,43 @@ class BookingCreator {
 			return self::error( 'meh_booking_unknown_calendar', 'The target calendar does not exist.', 400 );
 		}
 
-		// Requirement 14.1: the date is chosen from the dates the enquirer
-		// offered, so a date they never offered is a bad request rather than a
-		// booking nobody agreed to.
-		$chosen = self::to_date( $date );
-		$ranges = isset( $enquiry['date_ranges'] ) ? (array) $enquiry['date_ranges'] : array();
+		// Requirement 14.1: the booking runs from the first day the team agreed
+		// to the last. An omitted end is the single-day case written the short
+		// way, not a missing value: the one date given is both bounds.
+		$first = self::to_date( $start );
+		$last  = ( null === $end || '' === trim( (string) $end ) ) ? $first : self::to_date( $end );
 
-		if ( null === $chosen || ! self::within_candidates( $chosen, $ranges ) ) {
+		if ( null === $first || null === $last ) {
 			return self::error(
-				'meh_booking_date_not_candidate',
-				'The chosen date is not inside any of the enquiry candidate date ranges.',
+				'meh_booking_invalid_date',
+				'The booking dates are not calendar dates.',
 				400,
-				array( 'candidate_ranges' => array_values( $ranges ) )
+				array(
+					'start_date' => is_scalar( $start ) ? (string) $start : '',
+					'end_date'   => is_scalar( $end ) ? (string) $end : '',
+				)
+			);
+		}
+
+		// A range ending before it starts names no days at all, so there is
+		// nothing to book and nothing to block. String comparison is exact at
+		// `Y-m-d` and needs no date arithmetic.
+		if ( $last < $first ) {
+			return self::error(
+				'meh_booking_invalid_range',
+				'The booking end date falls before its start date.',
+				400,
+				array(
+					'start_date' => $first,
+					'end_date'   => $last,
+				)
 			);
 		}
 
 		$now = Clock::mysql();
 
-		// Requirements 14.2, 14.3: a single-day booking, guest name and email
-		// from the enquiry, the name test-prefixed on the staging copy
+		// Requirements 14.2, 14.3: the agreed range, guest name and email from
+		// the enquiry, the name test-prefixed on the staging copy
 		// (Requirement 17.3).
 		$guest_name = StagingMarker::apply_name( self::guest_name( $enquiry ) );
 		$booking_id = (int) wpbs_insert_booking(
@@ -186,8 +215,8 @@ class BookingCreator {
 				// No WPBS form is involved, so no form flow — email,
 				// payment, pricing, inventory — can run (Requirement 14.11).
 				'form_id'       => 0,
-				'start_date'    => $chosen,
-				'end_date'      => $chosen,
+				'start_date'    => $first,
+				'end_date'      => $last,
 				// Array is JSON-encoded by the WPBS DB layer.
 				'fields'        => self::booking_fields( $guest_name, (string) $enquiry['email'] ),
 				'status'        => self::BOOKING_STATUS,
@@ -204,7 +233,8 @@ class BookingCreator {
 				array(
 					'enquiry_id'  => $enquiry_id,
 					'calendar_id' => $calendar_id,
-					'date'        => $chosen,
+					'start_date'  => $first,
+					'end_date'    => $last,
 				)
 			);
 
@@ -217,11 +247,11 @@ class BookingCreator {
 
 		$warnings = array();
 
-		// Requirement 14.4: block the day with the calendar's own `booked`
-		// legend item. A calendar with no such item cannot be blocked, which is
-		// a configuration fault worth reporting, not a reason to discard a
-		// booking that already exists.
-		$blocked = SourceWpbs::block_dates( $calendar_id, $booking_id, $chosen, $chosen );
+		// Requirement 14.4: block every day of the range with the calendar's own
+		// `booked` legend item. A calendar with no such item cannot be blocked,
+		// which is a configuration fault worth reporting, not a reason to discard
+		// a booking that already exists.
+		$blocked = SourceWpbs::block_dates( $calendar_id, $booking_id, $first, $last );
 
 		if ( $blocked < 1 ) {
 			$warnings[] = 'meh_booking_date_not_blocked';
@@ -232,13 +262,14 @@ class BookingCreator {
 					'enquiry_id'  => $enquiry_id,
 					'booking_id'  => $booking_id,
 					'calendar_id' => $calendar_id,
-					'date'        => $chosen,
+					'start_date'  => $first,
+					'end_date'    => $last,
 				)
 			);
 		}
 
 		if ( class_exists( __NAMESPACE__ . '\CalendarReader' ) ) {
-			CalendarReader::clear_cache( $chosen, $chosen );
+			CalendarReader::clear_cache( $first, $last );
 		}
 
 		// Requirement 14.5.
@@ -261,12 +292,18 @@ class BookingCreator {
 		HistoryRecorder::record(
 			$enquiry_id,
 			self::HISTORY_TYPE,
-			sprintf( 'Booking %d created on %s for %s.', $booking_id, $calendars[ $calendar_id ], $chosen ),
+			sprintf(
+				'Booking %d created on %s for %s.',
+				$booking_id,
+				$calendars[ $calendar_id ],
+				self::span( $first, $last )
+			),
 			array(
 				'booking_id'  => $booking_id,
 				'calendar_id' => $calendar_id,
 				'calendar'    => (string) $calendars[ $calendar_id ],
-				'date'        => $chosen,
+				'start_date'  => $first,
+				'end_date'    => $last,
 			)
 		);
 
@@ -294,10 +331,30 @@ class BookingCreator {
 			'booking_id'  => $booking_id,
 			'edit_url'    => self::edit_url( $calendar_id, $booking_id ),
 			'calendar_id' => $calendar_id,
-			'date'        => $chosen,
+			'start_date'  => $first,
+			'end_date'    => $last,
 			'blocked'     => (int) $blocked,
 			'warnings'    => $warnings,
 		);
+	}
+
+	/**
+	 * A booked range as one readable phrase.
+	 *
+	 * A single-day booking reads as the day rather than as the same date written
+	 * twice, which is how the history entry for one ends up saying what happened
+	 * instead of stating it as a range of no length.
+	 *
+	 * @param string $first First day, `Y-m-d`.
+	 * @param string $last  Last day, `Y-m-d`.
+	 * @return string
+	 */
+	protected static function span( $first, $last ) {
+		if ( $first === $last ) {
+			return (string) $first;
+		}
+
+		return sprintf( '%s to %s', $first, $last );
 	}
 
 	/**
@@ -363,38 +420,6 @@ class BookingCreator {
 			),
 			admin_url( 'admin.php' )
 		);
-	}
-
-	/**
-	 * Whether a chosen day falls inside any of the enquiry's candidate ranges.
-	 *
-	 * Inclusive of both bounds: an enquirer offering the 1st to the 3rd has
-	 * offered the 1st and the 3rd. The comparison is string-wise, which is exact
-	 * for `Y-m-d` and needs no date arithmetic.
-	 *
-	 * @param string $chosen Chosen date, `Y-m-d`.
-	 * @param array  $ranges Candidate ranges as the store hydrates them.
-	 * @return bool
-	 */
-	protected static function within_candidates( $chosen, array $ranges ) {
-		foreach ( $ranges as $range ) {
-			if ( ! is_array( $range ) || ! isset( $range['start'], $range['end'] ) ) {
-				continue;
-			}
-
-			$start = self::to_date( $range['start'] );
-			$end   = self::to_date( $range['end'] );
-
-			if ( null === $start || null === $end ) {
-				continue;
-			}
-
-			if ( $chosen >= $start && $chosen <= $end ) {
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	/**

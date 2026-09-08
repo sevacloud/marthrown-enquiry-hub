@@ -4,11 +4,11 @@
  *
  * Feature: enquiry-data-layer, Property 34: For any conversion request that
  * names a calendar identifier matching no WP Booking System calendar, or a date
- * that is not one of the enquiry's candidate dates, or targets an enquiry that
- * already holds a booking identifier, or is made while WP Booking System is
- * inactive, the response carries the status defined for that condition (400,
- * 400, 409 and 503 respectively), no booking and no blocking event is created,
- * and the enquiry's status and `booking_id` are unchanged.
+ * range that is not a pair of calendar dates running forwards, or targets an
+ * enquiry that already holds a booking identifier, or is made while WP Booking
+ * System is inactive, the response carries the status defined for that condition
+ * (400, 400, 409 and 503 respectively), no booking and no blocking event is
+ * created, and the enquiry's status and `booking_id` are unchanged.
  *
  * **Validates: Requirements 14.8, 14.9, 14.10**
  *
@@ -17,9 +17,15 @@
  * - The four conditions are drawn independently, so a request can carry any
  *   combination of them and at least one is always present. The expected status
  *   follows the guard order `BookingCreator` documents — unavailable, already
- *   linked, unknown calendar, date not a candidate — because a request carrying
- *   two conditions can only be answered with one status, and the earlier guard
- *   is the one that answers.
+ *   linked, unknown calendar, unusable range — because a request carrying two
+ *   conditions can only be answered with one status, and the earlier guard is the
+ *   one that answers.
+ * - The unusable range is drawn two ways, which are the two ways a range can name
+ *   no days: a value that is not a calendar date, and a pair whose end falls
+ *   before its start. A range the enquirer never offered is deliberately *not*
+ *   among them, because conversion accepts one — the candidate ranges are the
+ *   choices the hub's date control offers, not a limit on what the team may agree
+ *   by telephone — and Property 33 quantifies over exactly that case.
  * - `closed` is deliberately absent from the generated statuses. Refusing a
  *   closed enquiry is a fifth guard, not one of the four conditions this
  *   property names, and it answers 409 ahead of the unknown-calendar and
@@ -105,8 +111,8 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 	const STATUS_ALREADY_LINKED = 409;
 
 	/**
-	 * The status an unknown calendar, or a date the enquirer never offered, is
-	 * answered with (Requirement 14.8).
+	 * The status an unknown calendar, or a range naming no days, is answered with
+	 * (Requirement 14.8).
 	 */
 	const STATUS_BAD_REQUEST = 400;
 
@@ -207,12 +213,13 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 
 					$request = $this->seed_request( $scenario );
 					$context = sprintf(
-						'enquiry %d seeded %s holding booking %s, calendar %d, date %s',
+						'enquiry %d seeded %s holding booking %s, calendar %d, range %s to %s',
 						$request['id'],
 						$request['status'],
 						var_export( $request['booking_id'], true ),
 						$request['calendar_id'],
-						var_export( $request['date'], true )
+						var_export( $request['date'], true ),
+						var_export( $request['end_date'], true )
 					);
 
 					$result = $this->convert( $request );
@@ -296,7 +303,12 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 		}
 
 		try {
-			return BookingCreator::create_from_enquiry( $request['id'], $request['calendar_id'], $request['date'] );
+			return BookingCreator::create_from_enquiry(
+				$request['id'],
+				$request['calendar_id'],
+				$request['date'],
+				$request['end_date']
+			);
 		} finally {
 			remove_filter( self::AVAILABILITY_FILTER, '__return_false' );
 		}
@@ -340,7 +352,7 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 
 		return array(
 			'status'    => self::STATUS_BAD_REQUEST,
-			'condition' => 'date is not a candidate date',
+			'condition' => 'the range names no days',
 		);
 	}
 
@@ -350,7 +362,7 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 
 	/**
 	 * One whole scenario: the four condition flags, the enquiry to target, and
-	 * the calendar and date the request names.
+	 * the calendar and date range the request names.
 	 *
 	 * @return \Eris\Generator
 	 */
@@ -377,8 +389,8 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 					'date_index'   => \Eris\Generators::choose( 0, 60 ),
 					'known'        => \Eris\Generators::elements( self::KNOWN_CALENDARS ),
 					'stray_offset' => \Eris\Generators::choose( 1, 500 ),
-					'date_shape'   => \Eris\Generators::elements( array( 'outside', 'unparseable' ) ),
-					'stray_days'   => \Eris\Generators::choose( 0, 400 ),
+					'date_shape'   => \Eris\Generators::elements( array( 'backwards', 'unparseable' ) ),
+					'back_days'    => \Eris\Generators::choose( 1, 400 ),
 					'unparseable'  => Generators::unparseable_date(),
 					'booking'      => \Eris\Generators::choose( 1, 9999 ),
 					'first_name'   => Generators::first_name(),
@@ -448,7 +460,7 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 	 * the request names.
 	 *
 	 * @param array $scenario Scenario as generated.
-	 * @return array{id:int,status:string,status_changed_at:string,booking_id:int|null,calendar_id:int,date:mixed,unavailable:bool,expected_status:int,condition:string}
+	 * @return array{id:int,status:string,status_changed_at:string,booking_id:int|null,calendar_id:int,date:mixed,end_date:mixed,unavailable:bool,expected_status:int,condition:string}
 	 */
 	private function seed_request( array $scenario ) {
 		$ranges     = array_values( (array) $scenario['ranges'] );
@@ -477,6 +489,7 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 		$this->assertSame( $booking_id, $stored['booking_id'], 'The fixture should seed booking_id as generated.' );
 
 		$expected = self::expected( $scenario );
+		$range    = self::range_for( $scenario, $ranges );
 
 		return array(
 			'id'                => (int) $id,
@@ -484,7 +497,8 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 			'status_changed_at' => $settled,
 			'booking_id'        => $booking_id,
 			'calendar_id'       => $this->calendar_for( $scenario ),
-			'date'              => self::date_for( $scenario, Generators::days_in_ranges( $ranges ) ),
+			'date'              => $range['start'],
+			'end_date'          => $range['end'],
 			'unavailable'       => (bool) $scenario['unavailable'],
 			'expected_status'   => $expected['status'],
 			'condition'         => $expected['condition'],
@@ -515,31 +529,43 @@ class ConversionGuardPropertyTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * The date the request names: one of the enquiry's candidate dates, or a
-	 * value that is not one of them.
+	 * The range the request names: a usable one, or one naming no days at all.
 	 *
-	 * The two ways a date can fail to be a candidate date are both drawn: a
-	 * perfectly good date the enquirer never offered, and a value that names no
-	 * calendar date at all.
+	 * The usable range is one of the enquiry's own candidate ranges, which is what
+	 * the hub's date control offers; a range the enquirer never offered would be
+	 * just as usable, and Property 33 books one. The unusable shapes are the two
+	 * ways a range can name no days: a start that is not a calendar date, and an
+	 * end falling before the start.
 	 *
 	 * @param array $scenario Scenario as generated.
-	 * @param array $dates    Every day the enquiry's candidate ranges cover.
-	 * @return string
+	 * @param array $ranges   The enquiry's candidate ranges.
+	 * @return array{start:mixed,end:mixed}
 	 */
-	private static function date_for( array $scenario, array $dates ) {
+	private static function range_for( array $scenario, array $ranges ) {
+		$range = $ranges[ (int) $scenario['date_index'] % count( $ranges ) ];
+
 		if ( ! $scenario['bad_date'] ) {
-			return (string) $dates[ (int) $scenario['date_index'] % count( $dates ) ];
+			return array(
+				'start' => (string) $range['start'],
+				'end'   => (string) $range['end'],
+			);
 		}
 
 		if ( 'unparseable' === $scenario['date_shape'] ) {
-			return (string) $scenario['unparseable'];
+			return array(
+				'start' => (string) $scenario['unparseable'],
+				'end'   => '',
+			);
 		}
 
-		// Candidate ranges sit within 450 days of the generator's base date, so a
-		// date beyond 1000 days cannot be one of them whatever was drawn.
-		$outside = Generators::date_at( 1000 + (int) $scenario['stray_days'] );
+		// A good start with an end some days earlier: both are calendar dates, and
+		// between them they name nothing.
+		$start = new \DateTimeImmutable( (string) $range['start'], new \DateTimeZone( 'UTC' ) );
 
-		return in_array( $outside, $dates, true ) ? Generators::date_at( 5000 ) : $outside;
+		return array(
+			'start' => $start->format( 'Y-m-d' ),
+			'end'   => $start->modify( sprintf( '-%d days', (int) $scenario['back_days'] ) )->format( 'Y-m-d' ),
+		);
 	}
 
 	/**

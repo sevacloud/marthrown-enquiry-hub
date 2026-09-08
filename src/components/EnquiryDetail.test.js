@@ -131,6 +131,24 @@ const CLOSED = {
 };
 
 /**
+ * The calendars WP Booking System holds, as the picker reads them.
+ *
+ * Named the way the real ones are: the exclusivity a calendar is for, then what
+ * it is for, which is why "Top Site" has to find "Top Site (Festival)" rather
+ * than needing the two names to be identical.
+ */
+const CALENDARS = [
+	{ id: 3, name: 'Full Site' },
+	{ id: 5, name: 'Top Site (Festival)' },
+	{ id: 9, name: 'Meadow' },
+];
+
+/**
+ * The same enquiry, with a Site Exclusivity that names one of those calendars.
+ */
+const TOP_SITE = { ...ENQUIRY, site_exclusivity: [ 'Top Site' ] };
+
+/**
  * Render the panel on an enquiry the caller already holds.
  *
  * An enquiry that can still be converted causes a calendar read on open, so the
@@ -157,6 +175,60 @@ async function renderPanel( enquiry, handlers = {} ) {
 	await act( async () => {} );
 
 	return rendered;
+}
+
+/**
+ * Render the panel with calendars to convert onto, and a convert route to reach.
+ *
+ * The conversion answers with the enquiry it was made for, which is what the
+ * panel reads back afterwards; the tests below assert what was posted, so the
+ * answer only has to be an enquiry.
+ *
+ * @param {Object} enquiry The enquiry to show.
+ * @return {Promise<Object>} Render result.
+ */
+async function renderConvertible( enquiry ) {
+	return renderPanel( enquiry, {
+		'GET calendars': () => ( { available: true, calendars: CALENDARS } ),
+		[ `POST enquiries/${ enquiry.id }/convert` ]: () => ( {
+			...enquiry,
+			booking_id: 41,
+			booking: { booking_id: 41, edit_url: '' },
+		} ),
+	} );
+}
+
+/**
+ * The booking range as the two date fields hold it.
+ *
+ * @return {string[]} [ start, end ].
+ */
+function bookingBounds() {
+	return [
+		screen.getByLabelText( 'Start date' ).value,
+		screen.getByLabelText( 'End date' ).value,
+	];
+}
+
+/**
+ * Press Create booking and return the body that reached the convert route.
+ *
+ * @return {Promise<Object>} Posted request body.
+ */
+async function createBooking() {
+	await act( async () => {
+		fireEvent.click(
+			screen.getByRole( 'button', { name: 'Create booking' } )
+		);
+	} );
+
+	const posted = apiFetch.mock.calls
+		.map( ( [ options ] ) => options )
+		.filter( ( options ) => /\/convert$/.test( String( options.path ) ) );
+
+	expect( posted ).toHaveLength( 1 );
+
+	return posted[ 0 ].data;
 }
 
 /**
@@ -288,20 +360,170 @@ describe( 'EnquiryDetail candidate ranges', () => {
 		] );
 	} );
 
-	it( 'offers every day the ranges cover as a booking date, ideal range first', async () => {
-		await renderPanel( ENQUIRY );
+} );
+
+describe( 'EnquiryDetail convert control', () => {
+	it( 'offers the candidate ranges and a custom one, opening on the ideal range', async () => {
+		await renderConvertible( TOP_SITE );
 
 		const options = [
-			...screen.getByLabelText( 'Booking date' ).querySelectorAll( 'option' ),
-		].map( ( option ) => option.value );
+			...screen
+				.getByLabelText( 'Booking dates' )
+				.querySelectorAll( 'option' ),
+		].map( ( option ) => `${ option.value }|${ option.textContent }` );
 
-		// The two days of the ideal range, then the one alternative day: a
-		// booking is a single day, so the control offers days, not ranges.
+		// Ranges, not days: the booking is the range, so the choice is which
+		// range rather than which day of one.
 		expect( options ).toEqual( [
-			'2026-05-01',
-			'2026-05-02',
-			'2026-06-14',
+			'0|Ideal: 2026-05-01 – 2026-05-02',
+			'1|Alternative 1: 2026-06-14',
+			'custom|Custom range…',
 		] );
+
+		// The ideal range's bounds are already in the fields the booking is made
+		// from, so converting on the dates the enquirer would rather have needs
+		// no interaction at all.
+		expect( bookingBounds() ).toEqual( [ '2026-05-01', '2026-05-02' ] );
+	} );
+
+	it( 'maps a chosen range onto the booking start and end dates', async () => {
+		await renderConvertible( TOP_SITE );
+
+		fireEvent.change( screen.getByLabelText( 'Booking dates' ), {
+			target: { value: '1' },
+		} );
+
+		// A single-day range is both bounds, not a start with the end left over
+		// from the range before it.
+		expect( bookingBounds() ).toEqual( [ '2026-06-14', '2026-06-14' ] );
+	} );
+
+	it( 'offers only the calendar the site exclusivity names, already chosen', async () => {
+		await renderConvertible( TOP_SITE );
+
+		const calendar = screen.getByLabelText( 'Calendar' );
+
+		expect(
+			[ ...calendar.querySelectorAll( 'option' ) ].map(
+				( option ) => option.textContent
+			)
+		).toEqual( [ 'Top Site (Festival)' ] );
+
+		// Named by the enquiry, so there is nothing to choose and nothing to get
+		// wrong: the control says which calendar and refuses to be changed.
+		expect( calendar.value ).toBe( '5' );
+		expect( calendar.disabled ).toBe( true );
+
+		const posted = await createBooking();
+
+		expect( posted.calendar_id ).toBe( 5 );
+	} );
+
+	it( 'offers every calendar when the exclusivity matches none, and says so', async () => {
+		// "whole site" is what this enquiry stores, and no calendar is named
+		// anything like it — the state a renamed calendar leaves behind.
+		await renderConvertible( ENQUIRY );
+
+		expect(
+			[
+				...screen
+					.getByLabelText( 'Calendar' )
+					.querySelectorAll( 'option' ),
+			].map( ( option ) => option.textContent )
+		).toEqual( [ 'Full Site', 'Top Site (Festival)', 'Meadow' ] );
+
+		expect(
+			screen.getByText(
+				'No calendar matches the site exclusivity asked for, so every calendar is offered.'
+			)
+		).toBeTruthy();
+	} );
+
+	it( 'sends a manually edited range, and reports it as a custom one', async () => {
+		await renderConvertible( TOP_SITE );
+
+		// A day added at the end by agreement: the range is edited rather than
+		// re-chosen, and the control stops claiming to be the ideal range.
+		fireEvent.change( screen.getByLabelText( 'End date' ), {
+			target: { value: '2026-05-03' },
+		} );
+
+		expect( screen.getByLabelText( 'Booking dates' ).value ).toBe(
+			'custom'
+		);
+
+		const posted = await createBooking();
+
+		expect( posted.date ).toBe( '2026-05-01' );
+		expect( posted.end_date ).toBe( '2026-05-03' );
+	} );
+
+	it( 'names the candidate range again when an edit lands back on one', async () => {
+		await renderConvertible( TOP_SITE );
+
+		fireEvent.change( screen.getByLabelText( 'End date' ), {
+			target: { value: '2026-05-03' },
+		} );
+		fireEvent.change( screen.getByLabelText( 'End date' ), {
+			target: { value: '2026-05-02' },
+		} );
+
+		// The dates are the ideal range's, so calling them custom would be the
+		// control disagreeing with what it is showing.
+		expect( screen.getByLabelText( 'Booking dates' ).value ).toBe( '0' );
+	} );
+
+	it( 'sends a single-day booking as one date', async () => {
+		await renderConvertible( TOP_SITE );
+
+		fireEvent.change( screen.getByLabelText( 'Booking dates' ), {
+			target: { value: '1' },
+		} );
+
+		const posted = await createBooking();
+
+		// Both bounds are the same day, and the route reads an absent end as
+		// exactly that, so the day is not sent twice.
+		expect( posted.date ).toBe( '2026-06-14' );
+		expect( posted.end_date ).toBeUndefined();
+	} );
+
+	it( 'refuses to convert on a range that ends before it starts', async () => {
+		await renderConvertible( TOP_SITE );
+
+		fireEvent.change( screen.getByLabelText( 'End date' ), {
+			target: { value: '2026-04-01' },
+		} );
+
+		expect(
+			screen.getByText( 'The end date falls before the start date.' )
+		).toBeTruthy();
+
+		// Said here rather than left to the route's 400: the control that would
+		// fix it is on screen.
+		expect(
+			screen.getByRole( 'button', { name: 'Create booking' } ).disabled
+		).toBe( true );
+	} );
+
+	it( 'offers the conversion to an enquiry holding no candidate ranges', async () => {
+		// Nothing to choose from, so the custom range is the whole of the offer.
+		// The alternative — withholding the control — leaves an enquiry agreed
+		// over the telephone with no way to become the booking it is.
+		await renderConvertible( { ...TOP_SITE, date_ranges: [] } );
+
+		expect(
+			[
+				...screen
+					.getByLabelText( 'Booking dates' )
+					.querySelectorAll( 'option' ),
+			].map( ( option ) => option.value )
+		).toEqual( [ 'custom' ] );
+
+		expect( bookingBounds() ).toEqual( [ '', '' ] );
+		expect(
+			screen.getByRole( 'button', { name: 'Create booking' } ).disabled
+		).toBe( true );
 	} );
 } );
 

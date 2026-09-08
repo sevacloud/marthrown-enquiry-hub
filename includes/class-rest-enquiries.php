@@ -1145,11 +1145,16 @@ class RestEnquiries {
 	/**
 	 * The declared args of the conversion route.
 	 *
-	 * Both are required, because Requirement 14.1 has the route accept a target
-	 * calendar identifier and a chosen candidate date: neither has a defensible
-	 * default. A calendar WP Booking System does not hold, and a date the
-	 * enquirer never offered, are refused by `BookingCreator` with a 400 rather
-	 * than guessed at here.
+	 * The calendar and the first day are required, because Requirement 14.1 has
+	 * the route accept a target calendar identifier and the agreed dates: neither
+	 * has a defensible default. A calendar WP Booking System does not hold, and a
+	 * value that is not a calendar date, are refused by `BookingCreator` with a
+	 * 400 rather than guessed at here.
+	 *
+	 * `end_date` is optional, and an omitted one means a single-day booking on
+	 * `date`. That is the one default worth having: it is not a guess about what
+	 * the caller meant, it is the shorter way of writing the same range, and it
+	 * keeps a client that only ever books one day from having to say so twice.
 	 *
 	 * @return array<string,array>
 	 */
@@ -1164,9 +1169,16 @@ class RestEnquiries {
 					'sanitize_callback' => 'absint',
 				),
 				'date'        => array(
-					'description'       => 'The chosen candidate date (Y-m-d).',
+					'description'       => 'First day of the booking (Y-m-d).',
 					'type'              => 'string',
 					'required'          => true,
+					'sanitize_callback' => 'sanitize_text_field',
+				),
+				'end_date'    => array(
+					'description'       => 'Last day of the booking (Y-m-d). Omitted means a single-day booking.',
+					'type'              => 'string',
+					'required'          => false,
+					'default'           => '',
 					'sanitize_callback' => 'sanitize_text_field',
 				),
 			)
@@ -1358,9 +1370,10 @@ class RestEnquiries {
 	 *
 	 * `guard_writable()` first, then one call to `BookingCreator`, which owns
 	 * every other guard the conversion has: WP Booking System being inactive
-	 * (503), an unknown calendar (400), a date the enquirer never offered (400)
-	 * and an enquiry already holding a booking (409). Each of those errors already
-	 * carries its status, so each is returned exactly as it came.
+	 * (503), an unknown calendar (400), dates that are not dates or that run
+	 * backwards (400) and an enquiry already holding a booking (409). Each of
+	 * those errors already carries its status, so each is returned exactly as it
+	 * came.
 	 *
 	 * The creator's `warnings` are lifted out of the booking payload and reported
 	 * alongside it, because a booking that was made but whose day could not be
@@ -1380,7 +1393,8 @@ class RestEnquiries {
 		$booking = BookingCreator::create_from_enquiry(
 			$id,
 			absint( $request->get_param( 'calendar_id' ) ),
-			(string) $request->get_param( 'date' )
+			(string) $request->get_param( 'date' ),
+			(string) $request->get_param( 'end_date' )
 		);
 
 		if ( is_wp_error( $booking ) ) {

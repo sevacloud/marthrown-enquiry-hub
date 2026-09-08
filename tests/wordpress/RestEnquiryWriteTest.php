@@ -391,8 +391,9 @@ class RestEnquiryWriteTest extends WP_UnitTestCase {
 
 	/**
 	 * Requirements 14.1, 14.5, 14.6: the route takes the target calendar and the
-	 * chosen candidate date, and answers with the booking and the converted
-	 * enquiry.
+	 * agreed date, and answers with the booking and the converted enquiry.
+	 *
+	 * An omitted `end_date` is the single-day booking written the short way.
 	 *
 	 * @return void
 	 */
@@ -412,7 +413,8 @@ class RestEnquiryWriteTest extends WP_UnitTestCase {
 		$this->assertSame( 200, $response->get_status() );
 		$this->assertSame( array(), $data['warnings'] );
 		$this->assertGreaterThan( 0, $data['booking']['booking_id'] );
-		$this->assertSame( self::CANDIDATE, $data['booking']['date'] );
+		$this->assertSame( self::CANDIDATE, $data['booking']['start_date'] );
+		$this->assertSame( self::CANDIDATE, $data['booking']['end_date'] );
 
 		$this->assertSame( 'converted', $data['enquiry']['status'] );
 		$this->assertSame( $data['booking']['booking_id'], $data['enquiry']['booking_id'] );
@@ -423,8 +425,40 @@ class RestEnquiryWriteTest extends WP_UnitTestCase {
 	}
 
 	/**
-	 * Requirement 14.1: a date the enquirer never offered is the creator's 400,
-	 * passed through, and the enquiry is left alone.
+	 * Requirement 14.1: the route carries an end date through, and the range it
+	 * books need not be one the enquirer offered — the team agrees dates by
+	 * telephone that were never typed into the form.
+	 *
+	 * @return void
+	 */
+	public function test_the_convert_route_books_a_custom_range() {
+		$id = $this->seed_enquiry();
+
+		$response = $this->post(
+			$id,
+			'convert',
+			array(
+				'calendar_id' => 1,
+				'date'        => '2025-12-24',
+				'end_date'    => '2025-12-26',
+			)
+		);
+		$data     = (array) $response->get_data();
+
+		$this->assertSame( 200, $response->get_status() );
+		$this->assertSame( '2025-12-24', $data['booking']['start_date'] );
+		$this->assertSame( '2025-12-26', $data['booking']['end_date'] );
+		$this->assertSame( 3, $data['booking']['blocked'] );
+
+		$booking = $this->wpbs->booking( $data['booking']['booking_id'] );
+
+		$this->assertSame( '2025-12-24', $booking['start_date'] );
+		$this->assertSame( '2025-12-26', $booking['end_date'] );
+	}
+
+	/**
+	 * Requirement 14.1: a range ending before it starts names no days, which is
+	 * the creator's 400, passed through, and the enquiry is left alone.
 	 *
 	 * @return void
 	 */
@@ -437,11 +471,12 @@ class RestEnquiryWriteTest extends WP_UnitTestCase {
 			array(
 				'calendar_id' => 1,
 				'date'        => '2025-12-25',
+				'end_date'    => '2025-12-20',
 			)
 		);
 
 		$this->assertSame( 400, $response->get_status() );
-		$this->assertSame( 'meh_booking_date_not_candidate', $response->get_data()['code'] );
+		$this->assertSame( 'meh_booking_invalid_range', $response->get_data()['code'] );
 
 		$enquiry = EnquiryStore::find( $id );
 
