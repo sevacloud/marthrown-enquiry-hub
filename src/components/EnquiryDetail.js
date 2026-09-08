@@ -27,10 +27,13 @@
  *   a closed one is the supported way forward (Requirement 9.3), and reading
  *   stays whole (Requirement 9.2).
  *
- * The panel accepts either an `id` to read, or an `enquiry` the caller already
- * holds — the list row it was opened from, say — and reads by id after any write
- * so the displayed values, the history and the offered transitions all come from
- * the same response rather than from a guess about what the write changed.
+ * The panel reads by `id` on open and again after any write, so the displayed
+ * values, the history and the offered transitions all come from the same
+ * response rather than from a guess about what the write changed. An `enquiry`
+ * the caller already holds — the list row it was opened from, say — is accepted
+ * as something to render while that first read is in flight; it is never a
+ * substitute for it, because a list row carries none of what the single-enquiry
+ * route adds.
  */
 import { __, sprintf } from '@wordpress/i18n';
 import { useCallback, useEffect, useState } from '@wordpress/element';
@@ -126,16 +129,25 @@ export default function EnquiryDetail( {
 		return fresh;
 	}, [ enquiryId ] );
 
-	// Read on open only when the caller handed over no enquiry to show. When it
-	// did, that row is enough to render from, and the first write reads the
-	// whole representation anyway.
+	// Always read on open, whether or not the caller handed a row over. A list
+	// row is not a substitute for the single-enquiry representation: `notes`,
+	// `history`, `siblings`, `crm_url` and the `allowed_transitions` the action
+	// buttons come from are all added by `present_single()` alone, so rendering
+	// from the row and skipping the read showed an enquiry with no notes, no
+	// history and no transitions until some write happened to read it back. The
+	// handed-over row is what the panel renders *while* this read is in flight,
+	// not instead of it.
 	useEffect( () => {
-		if ( selected || ! enquiryId ) {
+		if ( ! enquiryId ) {
 			return undefined;
 		}
 
 		let live = true;
 		setLoading( true );
+		// A failure warning belongs to the read that raised it, not to the panel:
+		// leaving it up would report the previous enquiry's failed read against
+		// this one.
+		setLoadFailed( false );
 
 		Promise.resolve()
 			.then( () => getEnquiry( enquiryId ) )
@@ -158,7 +170,6 @@ export default function EnquiryDetail( {
 		return () => {
 			live = false;
 		};
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [ enquiryId ] );
 
 	const status = enquiry ? String( enquiry.status || '' ) : '';

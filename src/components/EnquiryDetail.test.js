@@ -62,6 +62,43 @@ const ENQUIRY = {
 };
 
 /**
+ * The same enquiry as a list row.
+ *
+ * `present_single()` is the only thing that adds the notes, the history, the
+ * siblings and the permitted transitions, so a row from the list route carries
+ * none of them — which is what the panel is handed when a row is clicked.
+ */
+const LIST_ROW = { ...ENQUIRY };
+delete LIST_ROW.notes;
+delete LIST_ROW.history;
+delete LIST_ROW.siblings;
+delete LIST_ROW.allowed_transitions;
+
+/**
+ * What the single-enquiry route answers for that row.
+ */
+const HYDRATED = {
+	...ENQUIRY,
+	notes: [
+		{
+			id: 1,
+			body: 'Rang about the marquee.',
+			author: 'Lee',
+			created_at: '2026-01-03 10:00:00',
+		},
+	],
+	history: [
+		{
+			id: 1,
+			entry_type: 'created',
+			description: 'Enquiry received.',
+			actor: '',
+			created_at: '2026-01-02 09:00:00',
+		},
+	],
+};
+
+/**
  * The same enquiry once it holds `closed`: no transition is permitted out of it,
  * which is why the payload's list is empty.
  */
@@ -115,6 +152,62 @@ function actionLabels( container ) {
 
 beforeEach( () => {
 	apiFetch.mockReset();
+} );
+
+describe( 'EnquiryDetail on open', () => {
+	// The panel used to skip its read whenever the caller handed a row over, and
+	// render from the row alone. A list row has no notes and no history, so the
+	// panel reported "No notes yet" and "No history recorded" for an enquiry that
+	// had both, until some write happened to read the enquiry back. Reading on
+	// open is what the offered transitions, the siblings and the CRM link depend
+	// on too, all of which the row is equally missing.
+	it( 'reads the enquiry so the notes and history show without a write', async () => {
+		apiFetch.mockImplementation(
+			respondWith( {
+				'GET calendars': () => ( { available: true, calendars: [] } ),
+				'GET enquiries/7': () => HYDRATED,
+			} )
+		);
+
+		render( <EnquiryDetail id={ LIST_ROW.id } enquiry={ LIST_ROW } /> );
+
+		expect(
+			await screen.findByText( 'Rang about the marquee.' )
+		).toBeTruthy();
+
+		expect( screen.getByText( 'Enquiry received.' ) ).toBeTruthy();
+		expect( screen.queryByText( 'No notes yet.' ) ).toBeNull();
+		expect( screen.queryByText( 'No history recorded.' ) ).toBeNull();
+
+		// Read on open, not as a side effect of a write.
+		expect(
+			apiFetch.mock.calls.every(
+				( [ options ] ) =>
+					! options.method || 'GET' === options.method
+			)
+		).toBe( true );
+	} );
+
+	it( 'offers the transitions the read returned, not the ones the row lacked', async () => {
+		apiFetch.mockImplementation(
+			respondWith( {
+				'GET calendars': () => ( { available: true, calendars: [] } ),
+				'GET enquiries/7': () => HYDRATED,
+			} )
+		);
+
+		const { container } = render(
+			<EnquiryDetail id={ LIST_ROW.id } enquiry={ LIST_ROW } />
+		);
+
+		await waitFor( () =>
+			expect(
+				actionLabels( container ).filter( ( label ) =>
+					label.startsWith( 'Mark ' )
+				)
+			).toEqual( [ 'Mark Quoted', 'Mark Lost' ] )
+		);
+	} );
 } );
 
 describe( 'EnquiryDetail action buttons', () => {
