@@ -9,7 +9,7 @@
  * plugin; the "View" link opens the booking there.
  */
 import { __ } from '@wordpress/i18n';
-import { useState, useEffect, useCallback } from '@wordpress/element';
+import { useState, useEffect, useCallback, useMemo } from '@wordpress/element';
 import { Notice, CheckboxControl } from '@wordpress/components';
 import usePolling from '../hooks/usePolling';
 import { getBookings, getCalendars, bookingsExportUrl } from '../api';
@@ -168,6 +168,25 @@ export default function BookingsManager() {
 	const counts = data && data.counts ? data.counts : {};
 	const available = ! data || data.available !== false;
 
+	// Every calendar's `color` is its *default* legend colour, and WPBS ships the
+	// same default legend for each new calendar — so reading `c.color` gave every
+	// swatch (and every id pill) the identical blue and the key said nothing. The
+	// colour instead comes from the calendar's position in the `GET /calendars`
+	// list, mapped onto WPBS's own ten `wpbs-booking-color-*` classes so adjacent
+	// calendars are visibly distinct. The map is keyed by calendar id so the id
+	// pills in the table pick the same class as the legend above them; past ten
+	// calendars the palette repeats.
+	const calendarColorClass = useMemo(
+		() =>
+			Object.fromEntries(
+				calendars.map( ( c, i ) => [
+					c.id,
+					`wpbs-booking-color-${ i % 10 }`,
+				] )
+			),
+		[ calendars ]
+	);
+
 	return (
 		<section className="wpbs-bm">
 			<div className="wpbs-plugin-sticky-header">
@@ -231,12 +250,9 @@ export default function BookingsManager() {
 					{ calendars.map( ( c ) => (
 						<li key={ c.id }>
 							<span
-								className="wpbs-calendar-legend__swatch"
-								style={
-									c.color
-										? { backgroundColor: c.color }
-										: undefined
-								}
+								className={ `wpbs-calendar-legend__swatch ${
+									calendarColorClass[ c.id ]
+								}` }
 							></span>
 							{ c.name }
 						</li>
@@ -300,7 +316,9 @@ export default function BookingsManager() {
 				columns={ COLUMNS }
 				rows={ items }
 				rowKey={ ( row ) => row.id }
-				renderCell={ renderBookingCell }
+				renderCell={ ( row, column ) =>
+					renderBookingCell( row, column, calendarColorClass )
+				}
 				loading={ loading && ! data }
 				error={ error }
 				errorText={ __(
@@ -319,26 +337,25 @@ export default function BookingsManager() {
 /**
  * One cell of the bookings list, by column key.
  *
- * @param {Object} row    Listed booking.
- * @param {Object} column `{ key, label }` from COLUMNS.
+ * @param {Object} row         Listed booking.
+ * @param {Object} column      `{ key, label }` from COLUMNS.
+ * @param {Object} colorClasses Calendar id => `wpbs-booking-color-*` class.
  * @return {*} Cell content.
  */
-function renderBookingCell( row, column ) {
+function renderBookingCell( row, column, colorClasses ) {
 	switch ( column.key ) {
 		case 'id':
-			// Coloured by calendar, not by id: `row.color` is the calendar's own
-			// WPBS legend colour (`SourceWpbs::calendar_colors()`), the same value
-			// `GET /calendars` exposes for the legend above the table. An id-based
-			// hash colour (`id % 10`) carried no information — a booking's colour
-			// changed depending on which id it happened to get, unrelated to
-			// which calendar it was on. Grouping by calendar is what makes the
-			// colour mean something at a glance.
+			// Coloured by calendar, not by id: the class comes from the calendar's
+			// slot in `colorClasses`, so the pill matches its swatch in the legend
+			// above the table. An id-based hash colour (`id % 10`) carried no
+			// information — a booking's colour changed depending on which id it
+			// happened to get, unrelated to which calendar it was on. Grouping by
+			// calendar is what makes the colour mean something at a glance.
 			return (
 				<span
-					className="wpbs-list-table-id"
-					style={
-						row.color ? { backgroundColor: row.color } : undefined
-					}
+					className={ `wpbs-list-table-id ${
+						colorClasses[ row.calendar_id ] || ''
+					}` }
 				>
 					#{ row.id }
 				</span>

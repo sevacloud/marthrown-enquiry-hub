@@ -1,6 +1,7 @@
 /**
  * Enquiry Hub React app styles.
  */
+@use 'sass:list';
 
 /* --- Shared section header bar -------------------------------------------
  *
@@ -297,9 +298,9 @@
 	}
 }
 
-/* Background colour set inline from `row.color` — the calendar's own WPBS
-   legend colour — so the id groups visually by calendar. #2271b1 is the
-   fallback for a calendar with no legend colour configured. */
+/* Background colour comes from the `wpbs-booking-color-*` class the component
+   assigns per calendar, so the id groups visually by calendar. #2271b1 is the
+   fallback for a booking on a calendar the legend has no slot for. */
 .wpbs-list-table-id {
 	display: inline-block;
 	padding: 1px 8px;
@@ -309,8 +310,24 @@
 	background: #2271b1;
 }
 
+/* WPBS's ten booking colours. The plugin defines `.wpbs-booking-color-0`…`-9`
+   itself, but only in its own admin CSS, which is not loaded on the front end
+   (the Calendar view) and whose single-class rules would lose or win against
+   ours depending on stylesheet order. Declaring them here — two classes deep,
+   so always the more specific — makes the swatch and the id pill agree on one
+   palette wherever they are rendered. Each is dark enough for white text. */
+$wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
+	#a83a8d, #4a6b1f, #9a4b1e, #3858e9;
+
+@for $i from 0 through 9 {
+	.wpbs-list-table-id.wpbs-booking-color-#{$i},
+	.wpbs-calendar-legend .wpbs-booking-color-#{$i} {
+		background: list.nth($wpbs-booking-colors, $i + 1);
+	}
+}
+
 /* The key to the id colours above: one swatch per calendar, in the same order
-   and the same colours as `GET /calendars` and the new-booking picker. */
+   and carrying the same colour class as the id pills in the table. */
 .wpbs-calendar-legend {
 	display: flex;
 	flex-wrap: wrap;
