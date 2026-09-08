@@ -102,39 +102,98 @@ class ExportEnquiries {
 
 		$out = fopen( 'php://output', 'w' );
 
-		fputcsv(
-			$out,
-			array(
-				__( 'ID', 'marthrown-enquiry-hub' ),
-				__( 'First name', 'marthrown-enquiry-hub' ),
-				__( 'Last name', 'marthrown-enquiry-hub' ),
-				__( 'Email', 'marthrown-enquiry-hub' ),
-				__( 'Phone', 'marthrown-enquiry-hub' ),
-				__( 'Candidate dates', 'marthrown-enquiry-hub' ),
-				__( 'Status', 'marthrown-enquiry-hub' ),
-				__( 'Source', 'marthrown-enquiry-hub' ),
-				__( 'Received', 'marthrown-enquiry-hub' ),
-			)
-		);
+		fputcsv( $out, self::columns() );
 
 		foreach ( $items as $enquiry ) {
-			fputcsv(
-				$out,
-				array(
-					$enquiry['id'],
-					$enquiry['first_name'],
-					$enquiry['last_name'],
-					$enquiry['email'],
-					$enquiry['phone'],
-					implode( ', ', (array) $enquiry['selected_dates'] ),
-					$enquiry['status'],
-					$enquiry['source'],
-					$enquiry['created_at'],
-				)
-			);
+			fputcsv( $out, self::row( $enquiry ) );
 		}
 
 		fclose( $out );
 		exit;
+	}
+
+	/**
+	 * The header row.
+	 *
+	 * Every field the enquiry record holds bar the payload: an export that left
+	 * some of them out was an export someone had to go back to the hub for.
+	 * `Message` sits last because it is the one field long enough to be worth
+	 * scrolling past rather than through.
+	 *
+	 * @return string[]
+	 */
+	public static function columns() {
+		return array(
+			__( 'ID', 'marthrown-enquiry-hub' ),
+			__( 'First name', 'marthrown-enquiry-hub' ),
+			__( 'Last name', 'marthrown-enquiry-hub' ),
+			__( 'Email', 'marthrown-enquiry-hub' ),
+			__( 'Phone', 'marthrown-enquiry-hub' ),
+			__( 'Total guests', 'marthrown-enquiry-hub' ),
+			__( 'Event type', 'marthrown-enquiry-hub' ),
+			__( 'Site exclusivity', 'marthrown-enquiry-hub' ),
+			__( 'Candidate dates', 'marthrown-enquiry-hub' ),
+			__( 'Status', 'marthrown-enquiry-hub' ),
+			__( 'Source', 'marthrown-enquiry-hub' ),
+			__( 'Received', 'marthrown-enquiry-hub' ),
+			__( 'Message', 'marthrown-enquiry-hub' ),
+		);
+	}
+
+	/**
+	 * One enquiry as a row, in the order columns() names.
+	 *
+	 * An unsupplied `total_guests` is the empty cell rather than `0`: the store
+	 * holds it as null precisely because no number was given, and a zero would
+	 * read as a party of none. The term sets and the candidate dates are joined
+	 * with a comma, which `fputcsv()` quotes for us.
+	 *
+	 * @param array $enquiry Enquiry as the store hydrates it.
+	 * @return array
+	 */
+	public static function row( array $enquiry ) {
+		return array(
+			self::cell( $enquiry, 'id' ),
+			self::cell( $enquiry, 'first_name' ),
+			self::cell( $enquiry, 'last_name' ),
+			self::cell( $enquiry, 'email' ),
+			self::cell( $enquiry, 'phone' ),
+			isset( $enquiry['total_guests'] ) ? $enquiry['total_guests'] : '',
+			self::joined( $enquiry, 'event_type' ),
+			self::joined( $enquiry, 'site_exclusivity' ),
+			self::joined( $enquiry, 'selected_dates' ),
+			self::cell( $enquiry, 'status' ),
+			self::cell( $enquiry, 'source' ),
+			self::cell( $enquiry, 'created_at' ),
+			self::cell( $enquiry, 'message' ),
+		);
+	}
+
+	/**
+	 * One scalar field, or the empty cell where the row does not carry it.
+	 *
+	 * @param array  $enquiry Enquiry as the store hydrates it.
+	 * @param string $field   Field name.
+	 * @return string
+	 */
+	protected static function cell( array $enquiry, $field ) {
+		return isset( $enquiry[ $field ] ) && is_scalar( $enquiry[ $field ] )
+			? (string) $enquiry[ $field ]
+			: '';
+	}
+
+	/**
+	 * One list field as a comma-separated cell.
+	 *
+	 * @param array  $enquiry Enquiry as the store hydrates it.
+	 * @param string $field   Field name.
+	 * @return string
+	 */
+	protected static function joined( array $enquiry, $field ) {
+		if ( ! isset( $enquiry[ $field ] ) || ! is_array( $enquiry[ $field ] ) ) {
+			return '';
+		}
+
+		return implode( ', ', $enquiry[ $field ] );
 	}
 }
