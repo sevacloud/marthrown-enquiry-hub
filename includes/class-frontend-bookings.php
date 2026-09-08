@@ -39,9 +39,16 @@ class FrontendBookings {
 	 */
 	public static function init() {
 		add_action( 'init', array( __CLASS__, 'add_rewrite' ) );
-		// After `add_rewrite`, so the rule is registered before a flush
-		// regenerates the stored set from the registered rules.
-		add_action( 'init', array( __CLASS__, 'maybe_flush' ), 20 );
+		/*
+		 * On `wp_loaded`, not `init`. A flush writes the whole rule set to the
+		 * `rewrite_rules` option, built from the rules registered by the time it
+		 * runs — so flushing part-way through `init` would store a set missing
+		 * every rewrite, post type and taxonomy registered after us, and other
+		 * people's URLs would 404 until the next flush put them back.
+		 * `wp_loaded` fires once every `init` callback has run, which is the
+		 * earliest point the set is complete.
+		 */
+		add_action( 'wp_loaded', array( __CLASS__, 'maybe_flush' ) );
 		add_filter( 'query_vars', array( __CLASS__, 'add_query_var' ) );
 		add_action( 'template_redirect', array( __CLASS__, 'maybe_render' ) );
 

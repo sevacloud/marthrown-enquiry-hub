@@ -140,6 +140,34 @@ class FrontendRouteTest extends WP_UnitTestCase {
 	}
 
 	/**
+	 * The flush waits until every rewrite on the site has been registered.
+	 *
+	 * A flush stores the whole rule set, not our rule alone, and it can only
+	 * store what has been registered by the time it runs. Flushing part-way
+	 * through `init` would therefore persist a set missing every rewrite, post
+	 * type and taxonomy registered after us — repairing our URL by breaking
+	 * other people's, and silently, until something flushed again. `wp_loaded`
+	 * is the first hook where the set is complete.
+	 *
+	 * @return void
+	 */
+	public function test_the_flush_waits_until_every_rewrite_is_registered() {
+		FrontendBookings::init();
+
+		$flush = array( FrontendBookings::class, 'maybe_flush' );
+
+		$this->assertNotFalse(
+			has_action( 'wp_loaded', $flush ),
+			'The flush should run on wp_loaded, once every init callback has had its say.'
+		);
+
+		$this->assertFalse(
+			has_action( 'init', $flush ),
+			'Flushing during init would store a rule set missing what is registered after us.'
+		);
+	}
+
+	/**
 	 * A flush is expensive — it regenerates every rule on the site and writes an
 	 * option — so a working route must not pay for one on every request.
 	 *

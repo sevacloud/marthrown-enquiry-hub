@@ -511,9 +511,13 @@ mirror that never re-activates the plugin, so `/bookings` 404ed on any
 environment the files were mirrored into, or where anything else flushed the
 rules while this plugin was inactive. Re-saving permalinks was the manual repair.
 
-It is no longer needed. `FrontendBookings::maybe_flush()` runs on `init` and
+It is no longer needed. `FrontendBookings::maybe_flush()` runs on `wp_loaded` and
 flushes once per deployed version, recording the version in the
 `meh_rewrite_version` option so a working route costs nothing on later requests.
+`wp_loaded` rather than `init` because a flush stores the whole rule set and can
+only store what has been registered when it runs: flushing part-way through
+`init` would drop every rewrite, post type and taxonomy registered after this
+plugin and 404 other people's URLs instead.
 If the rule goes missing after that, it is flushed for once more and then left
 alone, because a rule something else filters away for good must not cost a flush
 on every request. Sites on plain permalinks are skipped entirely — they store no
