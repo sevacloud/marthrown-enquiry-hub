@@ -530,7 +530,13 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 .meh-main {
 	flex: 1 1 auto;
 	min-width: 0;
-	margin: 0;
+	/* White space above the first section, carried by this column alone. The nav
+	   is a sibling in the same stretched flex row, so a top margin here offsets
+	   only the content: the nav still starts at the top of the row and its right
+	   border still meets `.meh-frontend-header` with no gap. Padding on
+	   `.meh-layout` or a margin on the row would separate the two, which is the
+	   thing being avoided. */
+	margin: 20px 0 0;
 	padding: 0;
 	/* The one scrolling region in the shell. `min-height: 0` is what allows a
 	   flex child to be shorter than its content and scroll, rather than growing
