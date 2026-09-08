@@ -27,7 +27,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
   - [x] 1.3 Add test fakes and shared generators
     - Create `tests/fakes/FakeCrm.php` recording every `createOrUpdate`, list and tag call and returning configurable subscriber ids or failures
     - Create `tests/fakes/FakeWpbs.php` recording `wpbs_insert_booking`/`wpbs_insert_event` calls and exposing calendar and legend fixtures
-    - Create `tests/Generators.php` with Eris generators for valid enquiries, candidate date sets of 1 to 10, term sets of 1 to 20, capacity-length field values, `total_guests` of 1 and 10000, and the adversarial string set (`'`, `"`, `\`, `--`, `;`, `%`, `_`, `%s`, `%d`)
+    - Create `tests/Generators.php` with Eris generators for valid enquiries, Candidate Date Range lists of one to three ranges, including a single-day range, term sets of 1 to 20, capacity-length field values, `total_guests` of 1 and 10000, and the adversarial string set (`'`, `"`, `\`, `--`, `;`, `%`, `_`, `%s`, `%d`)
     - _Requirements: 1.18, 3.10_
 
 - [x] 2. Implement the schema manager
@@ -52,7 +52,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
 
   - [x] 2.4 Write unit tests for schema facts
     - Table names carry the WordPress prefix plus `meh_` and stay within 64 characters, including under a long prefix
-    - The indexes named in the design exist on the enquiry and candidate date tables
+    - The indexes named in the design exist on the enquiry and Candidate Date Range tables
     - `install()` completes inside 30 seconds against an empty database
     - No code path drops an Enquiry Store table
     - _Requirements: 1.13, 1.14, 1.15, 1.9_
@@ -60,8 +60,8 @@ The design defines 43 correctness properties. Each one gets its own property-bas
 - [x] 3. Implement the enquiry store
   - [x] 3.1 Implement enquiry writes and hydrated reads
     - Create `includes/class-enquiry-store.php` with `create()`, `update_fields()` and `find()`
-    - `create()` writes the parent row then candidate date, term and payload rows inside a transaction, rolling back or deleting written rows on any child failure and returning `WP_Error`
-    - `find()` returns the hydrated shape in the design, with `selected_dates`, `event_type` and `site_exclusivity` as arrays and `payload` decoded
+    - `create()` writes the parent row then Candidate Date Range, term and payload rows inside a transaction, rolling back or deleting written rows on any child failure and returning `WP_Error`
+    - `find()` returns the hydrated shape in the design, with `date_ranges` as a rank-ordered list of `start`/`end` pairs, `event_type` and `site_exclusivity` as arrays and `payload` decoded
     - Serialize the payload snapshot as JSON into the `LONGTEXT` column
     - Bind every value through `$wpdb->prepare()`
     - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.18, 3.10, 3.13_
@@ -108,13 +108,13 @@ The design defines 43 correctness properties. Each one gets its own property-bas
 - [x] 5. Implement pure intake and query logic
   - [x] 5.1 Implement `Validator`
     - Create `includes/class-enquiry-validator.php` with `validate( array $fields, string $profile = PROFILE_WEBHOOK, string $mode = MODE_FULL )`, `required_for()`, `is_empty()` and `allowed_terms()`
-    - Declare `REQUIRED_BY_PROFILE`: `PROFILE_WEBHOOK` requires all nine fields, `PROFILE_MANUAL` requires exactly `first_name`, `last_name`, `email` and `selected_dates`
+    - Declare `REQUIRED_BY_PROFILE`: `PROFILE_WEBHOOK` requires all nine fields, `PROFILE_MANUAL` requires exactly `first_name`, `last_name`, `email` and `date_ranges`
     - `$profile` selects the required-field set and nothing else; collect every failing field into one error set before returning
     - `$mode` decides only whether absence counts as a violation: under `MODE_FULL` (creation by either route) a required field that is absent fails, under `MODE_PARTIAL` (an edit) a required field that is absent is simply not being changed and produces no failure, while a required field present and holding an empty value fails in both modes
     - Implement `is_empty()` as the one emptiness predicate — key absent, empty string, whitespace-only, or empty collection — used by the presence check and the value-rule gate alike so the two can never disagree
     - Gate every value rule on the field being present and non-empty after trimming rather than on the profile, so an absent or empty optional field yields no error under `PROFILE_MANUAL` while the same field carrying a violating value is rejected identically under both profiles
-    - Apply email validation, `total_guests` range 1 to 10000, 1 to 10 parseable candidate dates, a digit check on `phone`, and vocabulary checks on `event_type` and `site_exclusivity` filtered through `meh_enquiry_terms_{taxonomy}`
-    - Keep `selected_dates` required under both profiles, so an edit submitting an empty date set is a failure rather than a set-clearing operation
+    - Apply email validation, `total_guests` range 1 to 10000, one to three Candidate Date Ranges each a parseable pair whose end is no earlier than its start, a digit check on `phone`, and vocabulary checks on `event_type` and `site_exclusivity` filtered through `meh_enquiry_terms_{taxonomy}`
+    - Keep `date_ranges` required under both profiles, so an edit submitting an empty list is a failure rather than a list-clearing operation
     - Strip HTML tags and trim, then truncate to the configured limits last, for every accepted value under either profile, so no length ever produces a failure
     - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 3.6, 3.7, 3.9, 3.11, 3.12, 3.14, 3.15, 3.16, 3.17, 3.18_
 
@@ -139,7 +139,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
   - [x] 5.6 Implement `EnquiryQuery`
     - Create `includes/class-enquiry-query.php` with `normalise()` and `build()`, touching no `$wpdb`
     - `normalise()` applies defaults, caps `per_page` at 200 with a default of 25, and canonicalises key order so differently-ordered parameter sets produce identical output
-    - `build()` returns `where`, `bindings`, `order`, `limit` and `warnings`, escaping `%` and `_` in search terms, joining candidate dates only when both `date_from` and `date_to` are present, and warning naming the missing parameter otherwise
+    - `build()` returns `where`, `bindings`, `order`, `limit` and `warnings`, escaping `%` and `_` in search terms, joining Candidate Date Ranges only when both `date_from` and `date_to` are present, and testing overlap rather than containment, and warning naming the missing parameter otherwise
     - Order by `created_at` descending with a deterministic id tie-break
     - _Requirements: 12.2, 12.3, 12.4, 12.5, 12.6, 12.7, 12.8, 12.10, 12.12, 12.13, 12.14, 12.15, 17.5_
 
@@ -200,7 +200,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
     - Register one route, `POST marthrown-enquiry-hub/v1/intake`, with `authenticate()` as its `permission_callback` so it runs before any other work
     - `presented_secret()` resolves the secret header-first from `X-MEH-Intake-Secret`, then falls back to the `meh_secret` query parameter
     - `authenticate()` compares the presented value against the stored `meh_intake_secret` with `hash_equals()` and returns `WP_Error( 'meh_intake_unauthorized', …, [ 'status' => 401 ] )` when the secret is absent or does not match, creating no enquiry, no rejection row and no payload log
-    - `normalise()` flattens a JSON or form-encoded body into a flat field map, decodes a delimited `selected_dates`, `event_type` or `site_exclusivity` value into an array, and reads the form identifier from the payload field named in `meh_intake_source_field`, falling back to the fixed value `webhook:unidentified`; nothing in it is specific to a sending form plugin
+    - `normalise()` flattens a JSON or form-encoded body into a flat field map, decodes a delimited `date_ranges`, `event_type` or `site_exclusivity` value into an array, and reads the three start/end field pairs into the ranked range list, and reads the form identifier from the payload field named in `meh_intake_source_field`, falling back to the fixed value `webhook:unidentified`; nothing in it is specific to a sending form plugin
     - `handle()` calls `IntakeHandler::receive()` with the normalised fields, the resolved source and the receipt time, wraps that call in `try`/`catch ( \Throwable )` answering 500 with no partial rows, and answers 201 with the enquiry identifier or 200 when no enquiry was created
     - Emit the secret value in no response body and no response header
     - _Requirements: 2.1, 2.3, 2.4, 2.12, 5.7, 16.8, 16.9, 16.10, 16.11, 16.12, 16.14, 16.15_
@@ -211,7 +211,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
 
   - [x] 8.3 Implement `DuplicateDetector`
     - Create `includes/class-duplicate-detector.php` with `find_duplicate()` and `is_rate_limited()`
-    - Match on email plus the exact candidate date set within a window filtered by `meh_duplicate_window`, defaulting to 900 seconds
+    - Match on email plus the exact set of Candidate Date Ranges, order-insensitively, within a window filtered by `meh_duplicate_window`, defaulting to 900 seconds
     - `is_rate_limited()` takes the submitted email address rather than a client IP, because a server-to-server webhook always presents the site's own address
     - Count requests per hashed submitted email address in a transient against `meh_rate_limit_per_email`, defaulting to 6 per 900 seconds per email, so the two intake guards share one time horizon
     - _Requirements: 4.2, 4.4, 4.5, 4.6, 4.7_
@@ -291,7 +291,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
 - [x] 20. Implement the shared creation path and the two authenticated write paths
   - [x] 20.1 Implement `EnquiryCreator`
     - Create `includes/class-enquiry-creator.php` with `create( array $fields, string $profile, string $source, string $at, int $actor )`, the single store-then-link sequence both creation callers share
-    - Order of work: validate under the given profile, `EnquiryStore::create()` writing the enquiry row, candidate dates, terms and payload snapshot in one transaction, `is_test` from `StagingMarker`, a `created` history entry attributed to `$actor`, then `ContactLinker::link()` setting `crm_sync_state` to `synced` or `pending`
+    - Order of work: validate under the given profile, `EnquiryStore::create()` writing the enquiry row, Candidate Date Ranges, terms and payload snapshot in one transaction, `is_test` from `StagingMarker`, a `created` history entry attributed to `$actor`, then `ContactLinker::link()` setting `crm_sync_state` to `synced` or `pending`
     - Set `status` to `new` and `created_at`, `updated_at` and `status_changed_at` all to `$at`, for either caller
     - Run no duplicate or rate-limit guard and write no rejection row; both belong to the caller, which is what confines the webhook-only behaviour to `IntakeHandler`
     - Fire `meh_enquiry_created` once per created enquiry, whichever caller invoked it
@@ -375,7 +375,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
 
   - [x] 12.2 Implement `BookingCreator`
     - Create `includes/class-booking-creator.php` with `create_from_enquiry()`
-    - Guard in order: WPBS available (503), enquiry exists (404), not closed (409), no existing `booking_id` (409), calendar known (400), date is a candidate date (400)
+    - Guard in order: WPBS available (503), enquiry exists (404), not closed (409), no existing `booking_id` (409), calendar known (400), both dates parse (400 `meh_booking_invalid_date`), end no earlier than start (400 `meh_booking_invalid_range`) — the booked range is deliberately *not* confined to the enquiry's Candidate Date Ranges
     - Insert the booking via `wpbs_insert_booking()` with start and end set to the chosen date and guest name/email from the enquiry, test-prefixed in staging
     - Block the date with the calendar's `booked` legend item via `wpbs_insert_event()`, keeping the booking and warning if blocking fails
     - Record `booking_id`, append `booking_linked` history, and transition the enquiry to `converted`
@@ -434,7 +434,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
     - **Validates: Requirements 12.9, 12.10, 12.11, 12.14**
 
   - [x] 15.3 Implement the single-enquiry route
-    - `GET /enquiries/{id}` returning fields, candidate dates, terms, notes, history, `crm_sync_state`, `booking_id`, the FluentCRM contact URL, `allowed_transitions` from `Lifecycle` and same-email siblings
+    - `GET /enquiries/{id}` returning fields, Candidate Date Ranges, terms, notes, history, `crm_sync_state`, `booking_id`, the FluentCRM contact URL, `allowed_transitions` from `Lifecycle` and same-email siblings
     - Return 404 for an unknown identifier and 500 with `meh_enquiry_incomplete` naming the missing field when `email`, `status` or `created_at` is absent, with no partial representation
     - _Requirements: 5.3, 13.1, 13.2, 13.3, 13.4, 13.5_
 
@@ -482,7 +482,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
     - _Requirements: 18.1, 18.2, 18.3, 18.4, 18.5, 18.6, 18.7, 18.8, 18.9, 18.10, 18.11, 18.12, 18.13, 18.14, 18.15, 18.21, 18.22_
 
   - [x] 15.13 Implement the enquiry edit route
-    - `PATCH /enquiries/{id}` accepting a partial body of `first_name`, `last_name`, `email`, `phone`, `total_guests`, `message`, `selected_dates`, `event_type` and `site_exclusivity`, each declared arg carrying a `sanitize_callback`
+    - `PATCH /enquiries/{id}` accepting a partial body of `first_name`, `last_name`, `email`, `phone`, `total_guests`, `message`, `date_ranges`, `event_type` and `site_exclusivity`, each declared arg carrying a `sanitize_callback`
     - Call `guard_writable()` before validation and before reading any stored value, so a closed enquiry is answered 409 whether the submitted body would have validated or not
     - Delegate to `EnquiryEditor::apply()`, answering 200 with the updated enquiry or 400 `meh_invalid_enquiry` carrying an `errors` map naming every failing field
     - Report an applied edit whose re-link failed as applied with a CRM warning rather than as a failure, the correction itself being stored
@@ -540,9 +540,9 @@ The design defines 43 correctness properties. Each one gets its own property-bas
     - _Requirements: 12.9, 17.4, 18.23_
 
   - [x] 18.3 Create `src/components/EnquiryDetail.js`
-    - Render candidate dates, multi-select values, message, notes, history, `crm_sync_state` with a retry action, booking link and CRM link
+    - Render Candidate Date Ranges, multi-select values, message, notes, a collapsed history disclosure, `crm_sync_state` with a retry action, booking link and CRM link
     - Build action buttons solely from `allowed_transitions`, plus duplicate, convert and add-note controls
-    - Add an edit control that opens `EnquiryForm` in edit mode pre-filled from the displayed enquiry's stored field values, candidate dates and multi-select values, and render no edit control at all for an enquiry holding `closed`, so the 409 is a backstop against a stale view rather than the normal path to that message
+    - Add an edit control that opens `EnquiryForm` in edit mode pre-filled from the displayed enquiry's stored field values, Candidate Date Ranges and multi-select values, and render no edit control at all for an enquiry holding `closed`, so the 409 is a backstop against a stale view rather than the normal path to that message
     - _Requirements: 5.3, 9.1, 13.2, 13.3, 13.6, 19.12, 19.20_
 
   - [x] 18.4 Update `src/components/EnquiryFilters.js`
@@ -557,7 +557,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
     - `EnquiryManager` renders six status tabs plus `all` with counts, a test badge exactly when `is_test` is true, and the hide-test toggle defaulting to off
     - `EnquiryDetail` renders action buttons matching `allowed_transitions` and none beyond them, including the case where `quoted` is offered and the case of a `closed` enquiry where none is
     - `EnquiryManager` renders a new-enquiry control that opens `EnquiryForm` empty, and submitting that form posts to `POST /enquiries` with the entered values and without keys for the optional fields left blank
-    - `EnquiryForm` in create mode marks `first_name`, `last_name`, `email` and at least one candidate date required and the remaining five optional, and renders per-field messages from a 400 response's `errors` map against the fields it names
+    - `EnquiryForm` in create mode marks `first_name`, `last_name`, `email` and the ideal Candidate Date Range required and the remaining five optional, and renders per-field messages from a 400 response's `errors` map against the fields it names
     - `EnquiryDetail` renders an edit control that opens `EnquiryForm` pre-filled with the displayed enquiry's stored values, and submitting it patches `/enquiries/{id}` with only the fields the user altered
     - `EnquiryDetail` renders no edit control for an enquiry holding `closed`
     - `BookingsManager` renders no convert control
@@ -565,7 +565,7 @@ The design defines 43 correctness properties. Each one gets its own property-bas
 
   - [x] 18.7 Create `src/components/EnquiryForm.js`
     - One component serving both write paths, create and edit mode differing only in submit target and initial values
-    - Mark `first_name`, `last_name`, `email` and at least one candidate date required, and `phone`, `total_guests`, `message`, `event_type` and `site_exclusivity` optional
+    - Mark `first_name`, `last_name`, `email` and the ideal Candidate Date Range required, and `phone`, `total_guests`, `message`, `event_type` and `site_exclusivity` optional
     - In create mode omit an optional field from the request body when it is left blank, which is what the Manual Validation Profile expects, and `POST` to `/enquiries`
     - In edit mode pre-fill from the displayed enquiry's stored values and submit only the fields the user actually altered, keeping the request a genuine partial update, and `PATCH` to `/enquiries/{id}`
     - Render per-field errors from a 400 response's `errors` map against the fields it names, so a multi-field failure is reported in one pass

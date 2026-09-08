@@ -338,7 +338,7 @@ SHOW DATABASES LIKE 'meh\_tests\_%';
 
 The design defines 43 correctness properties, each with its own test task in the
 implementation plan. `tests/Generators.php` holds the shared Eris generators —
-valid enquiries, candidate date sets of 1 to 10, term sets of 0 to 20, values at
+valid enquiries, Candidate Date Range lists of one to three ranges, term sets of 0 to 20, values at
 exactly their stored capacity, `total_guests` boundaries of 1 and 10000, and an
 adversarial string set (`'`, `"`, `\`, `--`, `;`, `%`, `_`, `%s`, `%d`) used to
 prove every submitted value is bound rather than interpolated into SQL.
