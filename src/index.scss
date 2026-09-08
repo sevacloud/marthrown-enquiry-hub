@@ -635,6 +635,11 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 	border-radius: 3px;
 	font-size: 11px;
 	line-height: 1.6;
+	/* The `wpbs-booking-color-*` class the row carries supplies the real colour.
+	   This is the floor under it: the label is white, so a bar that matched no
+	   colour rule was white on nothing — invisible rather than merely unstyled.
+	   Same fallback, and for the same reason, as `.wpbs-list-table-id`. */
+	background: #2271b1;
 	color: #fff;
 	text-decoration: none;
 
