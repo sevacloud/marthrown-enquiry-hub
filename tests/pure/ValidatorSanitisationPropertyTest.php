@@ -8,10 +8,21 @@
  * itself on ABSPATH, which is defined below purely so the file can be loaded —
  * nothing here needs WordPress to be present.
  *
+ * It does need a vocabulary of its own, though. The generated submissions carry
+ * `event_type` and `site_exclusivity` values drawn from the fixture
+ * vocabularies, and the property is that they are *accepted*, so whatever
+ * `meh_enquiry_terms_{taxonomy}` answers has to contain them. With WordPress
+ * unloaded nothing answers and the fields are unconstrained, which is why this
+ * passed without saying so; run in the same process as the wordpress suite,
+ * `EnquiryTaxonomies` answers with the live site vocabulary instead, and every
+ * generated term reads as `not_allowed`. Pinning the fixture vocabulary here
+ * makes the test say what it means in either process.
+ *
  * @package MarthrownEnquiryHub
  */
 
 use Eris\TestTrait;
+use MarthrownEnquiryHub\Tests\Fakes\FakeFilters;
 use MarthrownEnquiryHub\Tests\Generators;
 use MarthrownEnquiryHub\Tests\Iterations;
 use MarthrownEnquiryHub\Validator;
@@ -21,6 +32,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 	define( 'ABSPATH', dirname( __DIR__, 2 ) . '/' );
 }
 
+require_once dirname( __DIR__ ) . '/fakes/FakeFilters.php';
 require_once dirname( __DIR__, 2 ) . '/includes/class-enquiry-validator.php';
 
 class ValidatorSanitisationPropertyTest extends TestCase {
@@ -41,6 +53,28 @@ class ValidatorSanitisationPropertyTest extends TestCase {
 	);
 
 	/**
+	 * Install the fixture vocabularies the generated submissions draw from.
+	 */
+	protected function setUp(): void {
+		parent::setUp();
+
+		FakeFilters::install();
+
+		foreach ( Generators::VOCABULARIES as $taxonomy => $vocabulary ) {
+			FakeFilters::set( 'meh_enquiry_terms_' . $taxonomy, $vocabulary );
+		}
+	}
+
+	/**
+	 * Leave no vocabulary behind for the next test.
+	 */
+	protected function tearDown(): void {
+		FakeFilters::uninstall();
+
+		parent::tearDown();
+	}
+
+	/**
 	 * Feature: enquiry-data-layer, Property 11: For any submission whose
 	 * `first_name`, `last_name`, `email`, `phone` or `message` values exceed their
 	 * limits and contain arbitrary HTML markup, any required-field profile, and
@@ -54,6 +88,11 @@ class ValidatorSanitisationPropertyTest extends TestCase {
 	 */
 	public function test_sanitisation_and_truncation_never_reject() {
 		$this->limitTo( Iterations::count( 100 ) );
+
+		// A failure here has four bound generators to shrink, which Eris will
+		// pursue for as long as it is given. Capped so a failure is reported
+		// rather than turning the suite into a hang.
+		$this->shrinkingTimeLimit( 1 );
 
 		$this->forAll(
 			Generators::enquiry(),

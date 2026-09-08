@@ -105,9 +105,16 @@ class HistoryLogPropertyTest extends WP_UnitTestCase {
 	/**
 	 * The only methods an insert-only log may expose (Requirement 11.2).
 	 *
+	 * Two reads, one predicate and one append. `latest_context_many` is the batch
+	 * read the closure outcome is derived through: `Lifecycle::closed_from_many()`
+	 * recovers the status an enquiry closed from out of the trail rather than
+	 * storing it again, and doing that for a page of list rows one query at a time
+	 * would cost a query per row. Adding a read does not weaken this property —
+	 * what it guards is that nothing here can change or remove an entry.
+	 *
 	 * @var string[]
 	 */
-	const PUBLIC_SURFACE = array( 'for_enquiry', 'is_recognised', 'record' );
+	const PUBLIC_SURFACE = array( 'for_enquiry', 'latest_context_many', 'is_recognised', 'record' );
 
 	/**
 	 * Description cores that must survive tag removal intact.

@@ -26,10 +26,11 @@
  * (Requirement 18.23).
  */
 import { __ } from '@wordpress/i18n';
-import { useState, useCallback } from '@wordpress/element';
+import { useState, useCallback, useEffect } from '@wordpress/element';
 import { Notice } from '@wordpress/components';
 import usePolling from '../hooks/usePolling';
 import { getEnquiries, enquiriesExportUrl } from '../api';
+import { confirmDiscardNote } from '../leaveGuard';
 import EnquiryFilters from './EnquiryFilters';
 import EnquiryDetail from './EnquiryDetail';
 import EnquiryForm from './EnquiryForm';
@@ -92,6 +93,8 @@ export default function EnquiryManager( {
 	title,
 	defaultStatus = 'all',
 	headingLevel = 2,
+	homeSignal = 0,
+	onDirtyChange,
 } ) {
 	const heading = title || __( 'Event Enquiries', 'marthrown-enquiry-hub' );
 
@@ -116,6 +119,11 @@ export default function EnquiryManager( {
 	const [ selectedId, setSelectedId ] = useState( 0 );
 	const [ creating, setCreating ] = useState( false );
 
+	// Whether the open detail panel holds a note that has not been added. Kept
+	// here rather than in the panel because it is this component and the side nav
+	// that own the controls which would throw it away.
+	const [ noteDirty, setNoteDirty ] = useState( false );
+
 	const fetcher = useCallback( () => getEnquiries( filters ), [ filters ] );
 	const { data, loading, error, refetch } = usePolling( fetcher, 60000, [
 		filters,
@@ -129,11 +137,46 @@ export default function EnquiryManager( {
 
 	// Both panels close back to the list and reread it: a created enquiry is a
 	// new row, and a transition, note or edit applied in the panel changes one.
-	const closePanels = () => {
+	const closePanels = useCallback( () => {
 		setCreating( false );
 		setSelectedId( 0 );
+		setNoteDirty( false );
 		refetch();
-	};
+	}, [ refetch ] );
+
+	// Closing on the user's own initiative, which is the only case that can lose
+	// work. `closePanels` itself stays unguarded, because the paths that call it
+	// directly — a created enquiry, a saved edit — have already written what the
+	// user typed.
+	const requestClose = useCallback( () => {
+		if ( noteDirty && ! confirmDiscardNote() ) {
+			return;
+		}
+
+		closePanels();
+	}, [ noteDirty, closePanels ] );
+
+	// The side nav asking for the list back. It arrives as a rising number rather
+	// than a boolean so that a second click of an already-selected Overview is a
+	// second request rather than a no-op, and the nav has nothing to reset.
+	//
+	// Unguarded on purpose: the nav asked about the unsaved note before it sent
+	// the signal, so asking again here would be the same question twice.
+	useEffect( () => {
+		if ( homeSignal > 0 ) {
+			closePanels();
+		}
+		// Only the signal should trigger this. Including `closePanels` would
+		// return the user to the list every time the list refetched.
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [ homeSignal ] );
+
+	// Upward, so the nav can ask before it switches away and unmounts the panel.
+	useEffect( () => {
+		if ( onDirtyChange ) {
+			onDirtyChange( noteDirty );
+		}
+	}, [ noteDirty, onDirtyChange ] );
 
 	// A created enquiry returns the user to the list, where the new row is: the
 	// panel that would open on it reads a route of its own, and nothing about a
@@ -183,8 +226,9 @@ export default function EnquiryManager( {
 				<EnquiryDetail
 					id={ selectedId }
 					enquiry={ selectedRow }
-					onClose={ closePanels }
+					onClose={ requestClose }
 					onChanged={ refetch }
+					onDirtyChange={ setNoteDirty }
 				/>
 			) }
 
@@ -278,7 +322,12 @@ function renderEnquiryCell( row, column, setSelectedId ) {
 			return dateList( row.selected_dates );
 
 		case 'status':
-			return <StatusBadge status={ row.status } />;
+			return (
+				<StatusBadge
+					status={ row.status }
+					closedFrom={ row.closed_from }
+				/>
+			);
 
 		case 'received':
 			return day( row.created_at );

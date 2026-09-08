@@ -185,6 +185,78 @@ class HistoryRecorder {
 	}
 
 	/**
+	 * The context of each enquiry's most recent entry of one type.
+	 *
+	 * The batch read behind a derived field: a caller that needs one fact out of
+	 * the trail for a whole page of enquiries pays one query rather than one per
+	 * row, and never has to hydrate entries it will not show.
+	 *
+	 * Only the latest entry per enquiry survives, which is what the descending
+	 * order and the `isset` guard together achieve — the first row seen for an
+	 * identifier is its most recent, so later ones are stepped over. The
+	 * identifier tie-break matches `for_enquiry()`, so "most recent" means the
+	 * same thing in both, including for entries written in the same second.
+	 *
+	 * An enquiry with no entry of the type is absent from the result rather than
+	 * present with an empty context, so a caller can tell "nothing recorded"
+	 * from "recorded with nothing in it".
+	 *
+	 * @param int[]  $enquiry_ids Enquiries to read.
+	 * @param string $type        One of self::TYPES.
+	 * @return array<int,array> Decoded context, keyed by enquiry identifier.
+	 */
+	public static function latest_context_many( array $enquiry_ids, $type ) {
+		global $wpdb;
+
+		$type  = (string) $type;
+		$table = Schema::table( 'history' );
+		$ids   = array();
+
+		foreach ( $enquiry_ids as $id ) {
+			$id = (int) $id;
+
+			if ( $id > 0 && ! in_array( $id, $ids, true ) ) {
+				$ids[] = $id;
+			}
+		}
+
+		if ( array() === $ids || ! self::is_recognised( $type ) || ! isset( $wpdb ) || '' === $table ) {
+			return array();
+		}
+
+		$placeholders = implode( ', ', array_fill( 0, count( $ids ), '%d' ) );
+
+		$sql = "SELECT enquiry_id, context FROM {$table}"
+			. " WHERE entry_type = %s AND enquiry_id IN ( {$placeholders} )"
+			. ' ORDER BY created_at DESC, id DESC';
+
+		$rows = $wpdb->get_results( // phpcs:ignore WordPress.DB
+			$wpdb->prepare( $sql, array_merge( array( $type ), $ids ) ), // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+			ARRAY_A
+		);
+
+		if ( ! is_array( $rows ) ) {
+			return array();
+		}
+
+		$contexts = array();
+
+		foreach ( $rows as $row ) {
+			$id = isset( $row['enquiry_id'] ) ? (int) $row['enquiry_id'] : 0;
+
+			if ( $id <= 0 || isset( $contexts[ $id ] ) ) {
+				continue;
+			}
+
+			$entry = self::hydrate( (array) $row );
+
+			$contexts[ $id ] = $entry['context'];
+		}
+
+		return $contexts;
+	}
+
+	/**
 	 * Whether a value is one of the eight recognised entry types.
 	 *
 	 * @param string $type Candidate type.

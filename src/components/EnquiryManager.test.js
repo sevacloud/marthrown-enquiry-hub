@@ -7,9 +7,15 @@
  * so the request that entry point produces is asserted here at the transport —
  * the path, the method, and the exact set of keys in the body.
  *
+ * It also owns both ways out of an open enquiry — its own "Back to list" and the
+ * side nav's request for the list, which arrives as `homeSignal` — and so it owns
+ * the warning that stands between an unfinished note and either of them. That is
+ * asserted here rather than in the panel, because the panel is not where the
+ * decision is made: it only reports that there is something to lose.
+ *
  * **Validates: Requirements 12.9, 17.4, 17.6, 18.23**
  */
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import apiFetch from '@wordpress/api-fetch';
 import { respondWith } from '../testing/apiFetchMock';
 import EnquiryManager from './EnquiryManager';
@@ -198,6 +204,154 @@ describe( 'EnquiryManager', () => {
 		} );
 	} );
 } );
+
+describe( 'EnquiryManager unsaved-note guard', () => {
+	let original;
+
+	beforeEach( () => {
+		original = window.confirm;
+	} );
+
+	afterEach( () => {
+		window.confirm = original;
+	} );
+
+	it( 'leaves the panel and the note alone when the warning is refused', async () => {
+		window.confirm = jest.fn( () => false );
+
+		await openEnquiry();
+		await writeNote( 'Rang, no answer.' );
+
+		await act( async () => {
+			fireEvent.click(
+				screen.getByRole( 'button', { name: 'Back to list' } )
+			);
+		} );
+
+		expect( window.confirm ).toHaveBeenCalledTimes( 1 );
+
+		// Cancelling has to lose nothing: the panel is still open and the note is
+		// still in the box, so a mis-click costs the user nothing at all.
+		expect(
+			screen.getByRole( 'button', { name: 'Back to list' } )
+		).toBeTruthy();
+		expect( screen.getByLabelText( 'Add a note' ).value ).toBe(
+			'Rang, no answer.'
+		);
+	} );
+
+	it( 'returns to the list when the warning is accepted', async () => {
+		window.confirm = jest.fn( () => true );
+
+		await openEnquiry();
+		await writeNote( 'Rang, no answer.' );
+
+		await act( async () => {
+			fireEvent.click(
+				screen.getByRole( 'button', { name: 'Back to list' } )
+			);
+		} );
+
+		expect( window.confirm ).toHaveBeenCalledTimes( 1 );
+		expect(
+			screen.queryByRole( 'button', { name: 'Back to list' } )
+		).toBeNull();
+		expect( screen.getByText( 'Staging Rig' ) ).toBeTruthy();
+	} );
+
+	it( 'does not ask when there is no note to lose', async () => {
+		window.confirm = jest.fn( () => true );
+
+		await openEnquiry();
+
+		await act( async () => {
+			fireEvent.click(
+				screen.getByRole( 'button', { name: 'Back to list' } )
+			);
+		} );
+
+		expect( window.confirm ).not.toHaveBeenCalled();
+		expect( screen.getByText( 'Staging Rig' ) ).toBeTruthy();
+	} );
+
+	it( 'does not ask again when the nav has already asked', async () => {
+		window.confirm = jest.fn( () => true );
+
+		const { rerender } = await openEnquiry();
+		await writeNote( 'Rang, no answer.' );
+
+		// The side nav puts the question before it sends the signal, so honouring
+		// the signal must not put it a second time. `homeSignal` is a rising number
+		// rather than a boolean, so a second Overview click is a second request.
+		await act( async () => {
+			rerender( <EnquiryManager homeSignal={ 1 } /> );
+		} );
+
+		expect( window.confirm ).not.toHaveBeenCalled();
+		expect(
+			screen.queryByRole( 'button', { name: 'Back to list' } )
+		).toBeNull();
+	} );
+} );
+
+/**
+ * The single-enquiry representation for the first listed row.
+ *
+ * The panel reads it on open, and it is the list row plus everything only
+ * `present_single()` adds.
+ */
+const DETAIL = {
+	...LIST.items[ 0 ],
+	total_guests: 12,
+	event_type: [],
+	site_exclusivity: [],
+	message: '',
+	source: 'kadence',
+	booking_id: 0,
+	crm_sync_state: 'synced',
+	allowed_transitions: [ 'contacted' ],
+	notes: [],
+	history: [],
+	siblings: [],
+	updated_at: '2026-01-02 09:00:00',
+	status_changed_at: '2026-01-02 09:00:00',
+};
+
+/**
+ * Render the list and open the first row's panel.
+ *
+ * @param {Object} handlers Extra apiFetch handlers.
+ * @return {Promise<Object>} Render result.
+ */
+async function openEnquiry( handlers = {} ) {
+	const rendered = await renderList( {
+		'GET enquiries/1': () => DETAIL,
+		// The first row has a candidate date and no booking, so the convert
+		// control is offered and reads the calendars.
+		'GET calendars': () => ( { available: true, calendars: [] } ),
+		...handlers,
+	} );
+
+	await act( async () => {
+		fireEvent.click( screen.getByRole( 'button', { name: 'Ada Lovelace' } ) );
+	} );
+
+	return rendered;
+}
+
+/**
+ * Type a note into the open panel without adding it.
+ *
+ * @param {string} body Note text.
+ * @return {Promise<void>} Resolves once the panel has reported itself dirty.
+ */
+async function writeNote( body ) {
+	await act( async () => {
+		fireEvent.change( screen.getByLabelText( 'Add a note' ), {
+			target: { value: body },
+		} );
+	} );
+}
 
 /**
  * The body of the create request, or null when none was made.

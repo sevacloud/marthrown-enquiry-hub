@@ -9,9 +9,16 @@
  * the hook; a repeat writes nothing; a refusal names both statuses and changes
  * nothing.
  *
- * The last test closes the loop on Requirement 7.12 with the lifecycle loaded:
- * `settled_before()` returns `converted` and `lost` enquiries only, so a `quoted`
- * enquiry that has sat for months is still not a candidate for auto-closure.
+ * `settled_before()` closes the loop on Requirement 7.12 with the lifecycle
+ * loaded: it returns `converted` and `lost` enquiries only, so a `quoted` enquiry
+ * that has sat for months is still not a candidate for auto-closure.
+ *
+ * The last two tests cover the other direction — reading a closure back.
+ * `closed_from()` recovers the status an enquiry held when it closed rather than
+ * storing it a second time, which is only sound because `closed` is terminal:
+ * with nowhere to go from it, the closure is necessarily the last status change,
+ * so the `from` of that entry is the outcome. The tests assert exactly that
+ * reading, including the two cases that have no answer.
  *
  * Like the other store tests, this one works against real tables at its own
  * prefix, because `Schema::install()` verifies each table through `SHOW TABLES`,
@@ -256,6 +263,93 @@ class LifecycleTransitionTest extends WP_UnitTestCase {
 			array( $converted, $lost ),
 			EnquiryStore::settled_before( '2025-06-01 00:00:00' )
 		);
+	}
+
+	/**
+	 * The status an enquiry held when it closed is recovered from the trail rather
+	 * than stored a second time.
+	 *
+	 * Both closure routes are covered, because both are the same route: the
+	 * auto-close job goes through `transition()` like a person clicking a button,
+	 * so both leave the `status_changed` entry this reads. The two answers that are
+	 * deliberately empty matter as much as the two that are not — an enquiry that
+	 * has not closed has no outcome, and neither has one whose closure predates the
+	 * trail, and inventing one for either would be worse than reporting none.
+	 *
+	 * @return void
+	 */
+	public function test_the_closure_outcome_is_recovered_from_the_trail() {
+		$won  = $this->seed_enquiry( array( 'status' => 'converted' ) );
+		$lost = $this->seed_enquiry( array( 'status' => 'lost' ) );
+		$open = $this->seed_enquiry( array( 'status' => 'quoted' ) );
+
+		// Closed by the store rather than by the lifecycle, so nothing recorded how
+		// it got there. This is what a row migrated in from before the trail looks
+		// like.
+		$untraced = $this->seed_enquiry( array( 'status' => 'closed' ) );
+
+		Clock::freeze( '2025-09-01 09:00:00' );
+
+		$this->assertTrue( Lifecycle::transition( $won, 'closed', 7 )['changed'] );
+		$this->assertTrue( Lifecycle::transition( $lost, 'closed', 0 )['changed'] );
+
+		// A later entry of another type must not displace the answer: it is the
+		// latest *status change* that records the closure, not the latest entry.
+		HistoryRecorder::record( $won, 'note_added', 'Filed the paperwork.', array(), 7 );
+
+		$this->assertSame( 'converted', Lifecycle::closed_from( $won ) );
+		$this->assertSame( 'lost', Lifecycle::closed_from( $lost ) );
+		$this->assertSame( '', Lifecycle::closed_from( $open ) );
+		$this->assertSame( '', Lifecycle::closed_from( $untraced ) );
+		$this->assertSame( '', Lifecycle::closed_from( 987654 ) );
+
+		// The batch read is what a list page uses, and answers for the enquiries
+		// that have an outcome and for no others — an absent key, not an empty one.
+		$outcomes = Lifecycle::closed_from_many( array( $won, $lost, $open, $untraced ) );
+
+		// Sorted before comparing: the map is read by identifier, so the order the
+		// rows happened to come back in is not part of the answer.
+		ksort( $outcomes );
+
+		$this->assertSame(
+			array(
+				$won  => 'converted',
+				$lost => 'lost',
+			),
+			$outcomes
+		);
+
+		$this->assertSame( array(), Lifecycle::closed_from_many( array() ) );
+	}
+
+	/**
+	 * An enquiry that passed through a settled status on its way somewhere else
+	 * reports the status it closed *from*, not the first one it left.
+	 *
+	 * `new → lost → closed` and `new → converted → closed` both end at `closed`
+	 * through one intermediate status, so the reading has to be of the last status
+	 * change rather than of the first, and this is the shape that tells the two
+	 * apart.
+	 *
+	 * @return void
+	 */
+	public function test_the_outcome_is_the_last_status_before_closure() {
+		$id = $this->seed_enquiry( array( 'status' => 'new' ) );
+
+		Clock::freeze( '2025-09-01 09:00:00' );
+		$this->assertTrue( Lifecycle::transition( $id, 'contacted', 7 )['changed'] );
+
+		Clock::freeze( '2025-09-02 09:00:00' );
+		$this->assertTrue( Lifecycle::transition( $id, 'lost', 7 )['changed'] );
+
+		// Before the closure there is no outcome to report, however many status
+		// changes the enquiry has behind it.
+		$this->assertSame( '', Lifecycle::closed_from( $id ) );
+
+		Clock::freeze( '2025-09-03 09:00:00' );
+		$this->assertTrue( Lifecycle::transition( $id, 'closed', 7 )['changed'] );
+
+		$this->assertSame( 'lost', Lifecycle::closed_from( $id ) );
 	}
 
 	/* ---------------------------------------------------------------------

@@ -23,6 +23,15 @@
  * real hook system; there, `set()` registers the value through `add_filter()`
  * instead of through the registry.
  *
+ * That second case is why `uninstall()` matters and why it has to undo the real
+ * registrations as well as the registry. Running both suites in one process
+ * loads WordPress before the pure suite runs, so a pure test's pin becomes a
+ * live hook on the same WordPress the wordpress suite then uses — and one that
+ * outlived its test would answer for every later test in the process. It has
+ * done exactly that: pinned vocabularies made valid intake submissions read as
+ * `not_allowed`, and a pinned empty `meh_field_map` emptied the configured
+ * mapping, in fourteen tests that each passed on their own.
+ *
  * @package MarthrownEnquiryHub
  */
 
@@ -48,12 +57,25 @@ namespace MarthrownEnquiryHub\Tests\Fakes {
 		protected static $installed = false;
 
 		/**
+		 * The real hooks set() registered, as hook name => callbacks.
+		 *
+		 * Kept so uninstall() can take them off again. Without this, a pin made
+		 * with WordPress loaded would outlive the test that made it: the callback
+		 * is a closure, so nothing else holds a reference that `remove_filter()`
+		 * could be given.
+		 *
+		 * @var array<string,callable[]>
+		 */
+		protected static $registered = array();
+
+		/**
 		 * Start with an empty registry.
 		 *
 		 * @return void
 		 */
 		public static function install() {
-			self::$values    = array();
+			self::uninstall();
+
 			self::$installed = true;
 		}
 
@@ -63,8 +85,17 @@ namespace MarthrownEnquiryHub\Tests\Fakes {
 		 * @return void
 		 */
 		public static function uninstall() {
-			self::$values    = array();
-			self::$installed = false;
+			if ( function_exists( 'remove_filter' ) ) {
+				foreach ( self::$registered as $hook => $callbacks ) {
+					foreach ( $callbacks as $callback ) {
+						remove_filter( $hook, $callback );
+					}
+				}
+			}
+
+			self::$registered = array();
+			self::$values     = array();
+			self::$installed  = false;
 		}
 
 		/**
@@ -81,14 +112,13 @@ namespace MarthrownEnquiryHub\Tests\Fakes {
 			// With a real WordPress loaded the shim below was never declared, so
 			// the only way to be heard is the real hook system.
 			if ( function_exists( 'add_filter' ) ) {
-				add_filter(
-					$hook,
-					function () use ( $value ) {
-						return $value;
-					},
-					10,
-					1
-				);
+				$callback = function () use ( $value ) {
+					return $value;
+				};
+
+				self::$registered[ $hook ][] = $callback;
+
+				add_filter( $hook, $callback, 10, 1 );
 			}
 		}
 

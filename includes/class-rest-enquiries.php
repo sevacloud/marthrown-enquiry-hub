@@ -1082,6 +1082,13 @@ class RestEnquiries {
 	 * `Lifecycle::transition()` with a 400 naming it rather than being coerced
 	 * here into something that happens to be recognised.
 	 *
+	 * `note` records why the move was made. It is optional, not required: the
+	 * transition is the thing this route exists to apply, and refusing a legal
+	 * move for want of a comment would put a reporting nicety ahead of the
+	 * lifecycle. Sanitised as a textarea, and left for `NoteService` to judge,
+	 * exactly as the note route does — the two must not disagree about what a
+	 * note may contain.
+	 *
 	 * @return array<string,array>
 	 */
 	protected static function status_args() {
@@ -1093,6 +1100,12 @@ class RestEnquiries {
 					'type'              => 'string',
 					'required'          => true,
 					'sanitize_callback' => 'sanitize_key',
+				),
+				'note'   => array(
+					'description'       => 'Optional note recording why the status was changed.',
+					'type'              => 'string',
+					'required'          => false,
+					'sanitize_callback' => 'sanitize_textarea_field',
 				),
 			)
 		);
@@ -1166,6 +1179,17 @@ class RestEnquiries {
 	 * (Requirement 7.9), which is why the response reports `changed` rather than
 	 * leaving a client to infer it from the status alone.
 	 *
+	 * An accompanying `note` is added after the transition, never before: a note
+	 * explaining a move that was then refused would be a record of something that
+	 * did not happen. It is added only when the transition changed something, for
+	 * the same reason — a repeat wrote nothing to explain.
+	 *
+	 * A note that `NoteService` refuses does not undo the transition, which has
+	 * already been written and recorded. The refusal is reported as `note_error`
+	 * beside the successful transition rather than as the response's status, so a
+	 * client is told exactly what landed and what did not instead of being left to
+	 * assume from a 400 that neither did.
+	 *
 	 * @param \WP_REST_Request $request Request.
 	 * @return \WP_REST_Response|\WP_Error
 	 */
@@ -1183,7 +1207,28 @@ class RestEnquiries {
 			return $transition;
 		}
 
-		return self::respond_with_enquiry( $id, array( 'transition' => $transition ), 200 );
+		$payload = array( 'transition' => $transition );
+		$note    = trim( (string) $request->get_param( 'note' ) );
+
+		if ( '' !== $note && ! empty( $transition['changed'] ) ) {
+			$note_id = NoteService::add( $id, $note );
+
+			if ( is_wp_error( $note_id ) ) {
+				$payload['note_error'] = $note_id->get_error_message();
+
+				Log::write(
+					'rest: status note not added',
+					array(
+						'enquiry_id' => $id,
+						'error'      => $note_id->get_error_message(),
+					)
+				);
+			} else {
+				$payload['note_id'] = (int) $note_id;
+			}
+		}
+
+		return self::respond_with_enquiry( $id, $payload, 200 );
 	}
 
 	/**
@@ -1721,19 +1766,64 @@ class RestEnquiries {
 	/**
 	 * Present a page of hydrated enquiries.
 	 *
+	 * The closure outcomes are resolved for the whole page in one read rather than
+	 * per row, so a 200-row page costs one extra query however many of its rows
+	 * are closed.
+	 *
 	 * @param array $enquiries Hydrated enquiries.
 	 * @return array<int,array>
 	 */
 	protected static function present_many( array $enquiries ) {
 		$items = array();
+		$ids   = array();
 
 		foreach ( $enquiries as $enquiry ) {
 			if ( is_array( $enquiry ) ) {
-				$items[] = self::present( $enquiry );
+				$ids[] = isset( $enquiry['id'] ) ? (int) $enquiry['id'] : 0;
 			}
 		}
 
+		$outcomes = Lifecycle::closed_from_many( $ids );
+
+		foreach ( $enquiries as $enquiry ) {
+			if ( ! is_array( $enquiry ) ) {
+				continue;
+			}
+
+			$row                = self::present( $enquiry );
+			$row['closed_from'] = self::closed_from( $row, $outcomes );
+
+			$items[] = $row;
+		}
+
 		return $items;
+	}
+
+	/**
+	 * The status a row held before it was closed, as the API reports it.
+	 *
+	 * Always present and always a string, `''` for an enquiry that is not closed,
+	 * so a client reading the field never has to test for the key and a falsy
+	 * value is what tells it there is no outcome to show — the same shape
+	 * `crm_url` carries for the same reason.
+	 *
+	 * Guarded on the row's own status rather than on the map alone: a stored status
+	 * that moved on without recording it would otherwise report an outcome for an
+	 * enquiry that is not closed.
+	 *
+	 * @param array             $enquiry  Presented enquiry.
+	 * @param array<int,string> $outcomes Outcomes by identifier, from `Lifecycle`.
+	 * @return string
+	 */
+	protected static function closed_from( array $enquiry, array $outcomes ) {
+		$id     = isset( $enquiry['id'] ) ? (int) $enquiry['id'] : 0;
+		$status = isset( $enquiry['status'] ) ? (string) $enquiry['status'] : '';
+
+		if ( self::STATUS_CLOSED !== $status || ! isset( $outcomes[ $id ] ) ) {
+			return '';
+		}
+
+		return (string) $outcomes[ $id ];
 	}
 
 	/**
@@ -1768,6 +1858,11 @@ class RestEnquiries {
 	 * booking identifier, the FluentCRM contact URL, the permitted transitions and
 	 * the same-email siblings.
 	 *
+	 * `closed_from` is derived rather than stored: it is the status the enquiry
+	 * held before it was closed, which `Lifecycle` recovers from the trail, and it
+	 * is what lets a closed enquiry be shown as won or lost rather than only as
+	 * finished. Every sibling carries it for the same reason.
+	 *
 	 * `allowed_transitions` comes from `Lifecycle` rather than from a list held
 	 * here, so the hub's action buttons can never offer an illegal transition and
 	 * need no update when the transition table changes (Requirement 13.6).
@@ -1785,9 +1880,51 @@ class RestEnquiries {
 		$enquiry['history']             = self::present_history( HistoryRecorder::for_enquiry( $id ) );
 		$enquiry['crm_url']             = self::crm_url( $enquiry );
 		$enquiry['allowed_transitions'] = array_values( Lifecycle::allowed_from( $status ) );
-		$enquiry['siblings']            = EnquiryStore::siblings_by_email( $email, $id );
+		$enquiry['siblings']            = self::present_siblings(
+			EnquiryStore::siblings_by_email( $email, $id )
+		);
+
+		$enquiry['closed_from'] = self::closed_from(
+			$enquiry,
+			Lifecycle::closed_from_many( array( $id ) )
+		);
 
 		return $enquiry;
+	}
+
+	/**
+	 * The same-email siblings as the API represents them.
+	 *
+	 * The store's summary plus each sibling's closure outcome, so a list of
+	 * closed siblings says how each one finished rather than only that it did.
+	 * One read for the whole list, whatever its length.
+	 *
+	 * @param array $siblings Sibling summaries from the store.
+	 * @return array<int,array>
+	 */
+	protected static function present_siblings( array $siblings ) {
+		$ids = array();
+
+		foreach ( $siblings as $sibling ) {
+			if ( is_array( $sibling ) ) {
+				$ids[] = isset( $sibling['id'] ) ? (int) $sibling['id'] : 0;
+			}
+		}
+
+		$outcomes  = Lifecycle::closed_from_many( $ids );
+		$presented = array();
+
+		foreach ( $siblings as $sibling ) {
+			if ( ! is_array( $sibling ) ) {
+				continue;
+			}
+
+			$sibling['closed_from'] = self::closed_from( $sibling, $outcomes );
+
+			$presented[] = $sibling;
+		}
+
+		return $presented;
 	}
 
 	/**

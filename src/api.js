@@ -78,17 +78,28 @@ export function updateEnquiry( id, fields = {} ) {
 }
 
 /**
- * Apply a lifecycle transition.
+ * Apply a lifecycle transition, optionally recording why.
+ *
+ * The note is omitted from the body when blank rather than sent empty: the route
+ * treats an absent note as "none supplied", and an empty one would have to be
+ * judged and refused by `NoteService` for no reason.
+ *
+ * The response carries `note_id` when a note was added and `note_error` when the
+ * transition landed but the note did not, so a caller can report the two
+ * separately.
  *
  * @param {number} id     Enquiry id.
  * @param {string} status new|contacted|quoted|converted|lost|closed.
+ * @param {string} note   Optional note recording why the status changed.
  * @return {Promise<Object>}
  */
-export function setEnquiryStatus( id, status ) {
+export function setEnquiryStatus( id, status, note = '' ) {
+	const body = String( note || '' ).trim();
+
 	return apiFetch( {
 		path: `enquiries/${ id }/status`,
 		method: 'POST',
-		data: { status },
+		data: body ? { status, note: body } : { status },
 	} );
 }
 

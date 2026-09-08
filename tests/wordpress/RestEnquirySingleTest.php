@@ -144,8 +144,17 @@ class RestEnquirySingleTest extends WP_UnitTestCase {
 			)
 		);
 
-		// A sibling sharing the email, and an unrelated enquiry that must not appear.
-		$sibling = $this->seed_enquiry( array( 'status' => 'closed' ) );
+		// A sibling sharing the email, holding multi-select values of its own so the
+		// sets the panel shows beside a repeat address are asserted rather than
+		// merely present, and an unrelated enquiry that must not appear.
+		$sibling = $this->seed_enquiry(
+			array( 'status' => 'closed' ),
+			array( '2025-09-06' ),
+			array(
+				'event_type'       => array( 'party' ),
+				'site_exclusivity' => array( 'shared' ),
+			)
+		);
 		$this->seed_enquiry( array( 'email' => 'someone-else@example.com' ) );
 
 		HistoryRecorder::record( $id, 'created', 'Enquiry created.', array(), 0 );
@@ -194,13 +203,24 @@ class RestEnquirySingleTest extends WP_UnitTestCase {
 		$this->assertSame( Lifecycle::allowed_from( 'contacted' ), $data['allowed_transitions'] );
 
 		// Requirement 13.3: every other enquiry sharing the email, holding exactly
-		// the identifier, `created_at` and status.
+		// the identifier, `created_at`, status, both multi-select sets and the
+		// closure outcome.
+		//
+		// `closed_from` is empty here even though the sibling holds `closed`, and
+		// that is the correct answer rather than a gap: the fixture was written
+		// straight into the status by the store, so no `status_changed` entry
+		// records the closure and there is no earlier status to report. Only a
+		// closure that went through `Lifecycle::transition()` has one, which is
+		// what `LifecycleTransitionTest` asserts.
 		$this->assertCount( 1, $data['siblings'] );
 		$this->assertSame(
 			array(
-				'id'         => $sibling,
-				'created_at' => self::NOW,
-				'status'     => 'closed',
+				'id'               => $sibling,
+				'created_at'       => self::NOW,
+				'status'           => 'closed',
+				'event_type'       => array( 'party' ),
+				'site_exclusivity' => array( 'shared' ),
+				'closed_from'      => '',
 			),
 			$data['siblings'][0]
 		);

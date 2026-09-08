@@ -1078,9 +1078,16 @@ class EnquiryStore {
 	/**
 	 * Other enquiries sharing an email address (Requirement 13.3).
 	 *
-	 * A summary rather than whole enquiries: identifier, creation time and
-	 * status is what the single-enquiry view shows, and reading full rows for a
-	 * frequent enquirer would cost child-row queries nothing displays.
+	 * A summary rather than whole enquiries: what the single-enquiry view shows
+	 * of a sibling, and no more. That is the identifier, the creation time, the
+	 * status and both multi-select sets — the last two because "another enquiry
+	 * from this address" is only useful once you can see whether it was the same
+	 * kind of event, which the identifier and date alone never told you. The
+	 * candidate dates, the message and the payload are still left out: nothing
+	 * renders them here, and a frequent enquirer would pay for them on every read.
+	 *
+	 * The term sets cost one query for the whole list, the same batch read the
+	 * list route uses, rather than one per sibling.
 	 *
 	 * An empty email returns nothing. `email` carries `''` for a row that was
 	 * stored without one, so matching on the empty string would relate every
@@ -1088,7 +1095,7 @@ class EnquiryStore {
 	 *
 	 * @param string $email      Email address to match, exactly.
 	 * @param int    $exclude_id Enquiry to leave out, normally the one being viewed.
-	 * @return array<int,array{id:int,created_at:string,status:string}> Most recent first.
+	 * @return array<int,array{id:int,created_at:string,status:string,event_type:string[],site_exclusivity:string[]}> Most recent first.
 	 */
 	public static function siblings_by_email( $email, $exclude_id = 0 ) {
 		global $wpdb;
@@ -1114,14 +1121,33 @@ class EnquiryStore {
 			return array();
 		}
 
+		$ids = array();
+
+		foreach ( $rows as $row ) {
+			$ids[] = isset( $row['id'] ) ? (int) $row['id'] : 0;
+		}
+
+		$terms    = self::terms_for_many( $ids );
 		$siblings = array();
 
 		foreach ( $rows as $row ) {
-			$siblings[] = array(
-				'id'         => isset( $row['id'] ) ? (int) $row['id'] : 0,
+			$id      = isset( $row['id'] ) ? (int) $row['id'] : 0;
+			$sibling = array(
+				'id'         => $id,
 				'created_at' => self::datetime( $row, 'created_at' ),
 				'status'     => self::text( $row, 'status' ),
 			);
+
+			// Both taxonomies are always present, empty when the sibling holds no
+			// term for one, so a reader never has to test for the key — the same
+			// guarantee `hydrate()` gives on a whole enquiry.
+			foreach ( self::TAXONOMIES as $taxonomy ) {
+				$sibling[ $taxonomy ] = isset( $terms[ $id ][ $taxonomy ] )
+					? array_values( (array) $terms[ $id ][ $taxonomy ] )
+					: array();
+			}
+
+			$siblings[] = $sibling;
 		}
 
 		return $siblings;

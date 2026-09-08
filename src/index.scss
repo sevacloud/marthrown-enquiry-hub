@@ -215,6 +215,22 @@
 		text-transform: uppercase;
 		letter-spacing: 0.04em;
 	}
+
+	/* The outcome badge behind a closed enquiry — "closed" beside "converted".
+	   Same hue as the status it names, outlined rather than filled, so the pair
+	   reads as one status and its qualifier rather than as two statuses arguing.
+	   The text colour still comes from the status modifier above; only the fill is
+	   taken away, and the outline picks that colour up through `currentcolor`.
+
+	   It has to come *after* the status modifiers, not before: the element carries
+	   both classes and they are the same specificity, so whichever is declared
+	   later wins the `background` — declared first, this rule lost its own
+	   transparency to the fill it is meant to remove. */
+	&--outcome {
+		background: transparent;
+		box-shadow: inset 0 0 0 1px currentcolor;
+		font-weight: 600;
+	}
 }
 
 /* The name cell in the enquiry list. A real <button> for its click/keyboard
@@ -244,6 +260,45 @@
 .meh-muted {
 	color: #646970;
 	font-size: 12px;
+}
+
+/* An action that reads as a link. A real <button>, because it performs a write
+   rather than going anywhere — a bare anchor would offer a middle click and an
+   open-in-new-tab that mean nothing here — with every trace of button chrome
+   taken off it.
+
+   It replaces WordPress's own `button-link`, which is declared only in wp-admin's
+   stylesheet. On the front end, where that CSS is not loaded, an element wearing
+   it fell all the way back to the browser's default button: a full-size grey
+   control sitting in the middle of a sentence. This is declared here, so it holds
+   in the hub and on the front end alike.
+
+   `font: inherit` covers family, size and weight in one, so the control matches
+   whatever text it sits in rather than being sized for one caller. */
+.meh-link-button {
+	display: inline;
+	margin: 0;
+	padding: 0;
+	background: none;
+	border: none;
+	color: #097464;
+	font: inherit;
+	text-align: left;
+	text-decoration: underline;
+	cursor: pointer;
+
+	&:hover,
+	&:focus {
+		color: #097464;
+		text-decoration: underline;
+	}
+
+	/* A write in flight, so it is briefly not clickable. Dimmed rather than left
+	   looking live, and the pointer says so too. */
+	&:disabled {
+		color: #646970;
+		cursor: default;
+	}
 }
 
 /* Status tabs with counts — the enquiry list and the bookings list share them. */
@@ -871,6 +926,31 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 		}
 	}
 
+	/* What a sibling enquiry was for, under its identifier and status. A two-column
+	   definition list rather than a line of text, so the labels line up down the
+	   list and the values can be scanned as a column — the point of showing them
+	   at all is comparing this enquiry with the others from the same address.
+
+	   Indented to the width of the identifier pill above it, so each sibling reads
+	   as one block rather than as a row followed by an unattached pair. */
+	&__sibling-terms {
+		display: grid;
+		grid-template-columns: minmax(90px, auto) 1fr;
+		gap: 0 10px;
+		margin: 4px 0 0 2px;
+		font-size: 12px;
+
+		dt {
+			color: #646970;
+			font-weight: 600;
+		}
+
+		dd {
+			margin: 0;
+			color: #1d2327;
+		}
+	}
+
 	&__entry-type {
 		margin-left: 6px;
 		padding: 1px 6px;
@@ -885,5 +965,31 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 		padding-left: 18px;
 		color: #50575e;
 		font-size: 12px;
+	}
+}
+
+/* The dialog that collects a comment before a status change.
+ *
+ * Only the parts `Modal` leaves to its caller are set here: it supplies the
+ * overlay, the frame, the heading and the close control. The width is capped
+ * because the body is one paragraph and one textarea, and a modal as wide as a
+ * large monitor makes both hard to read.
+ */
+.meh-status-modal {
+	max-width: 460px;
+
+	&__lead {
+		margin: 0 0 12px;
+		color: #50575e;
+	}
+
+	/* Confirm last, at the trailing edge: the same order as the rest of the hub's
+	   paired controls, so the primary action is always in the same place. */
+	&__actions {
+		display: flex;
+		align-items: center;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 16px;
 	}
 }

@@ -374,7 +374,13 @@ class EnquiryStoreOperationsTest extends WP_UnitTestCase {
 
 	/**
 	 * Siblings are the other enquiries holding the same email, most recent first
-	 * (Requirement 13.3).
+	 * (Requirement 13.3), each summarised with both multi-select sets.
+	 *
+	 * The sets are read in one batch rather than per sibling, and both keys are
+	 * always present: a sibling holding no term for a taxonomy carries the empty
+	 * array, which is the same guarantee `hydrate()` gives on a whole enquiry, so a
+	 * reader never has to test for the key. Both cases are seeded below for that
+	 * reason.
 	 *
 	 * @return void
 	 */
@@ -384,9 +390,15 @@ class EnquiryStoreOperationsTest extends WP_UnitTestCase {
 				'email'      => 'ada@example.com',
 				'status'     => 'closed',
 				'created_at' => '2024-09-02 12:00:00',
+			),
+			array( '2024-10-05' ),
+			array(
+				'event_type'       => array( 'wedding', 'reception' ),
+				'site_exclusivity' => array( 'whole_site' ),
 			)
 		);
 
+		// No terms at all, so the summary has to supply both keys empty.
 		$newer = $this->seed_enquiry(
 			array(
 				'email'      => 'ada@example.com',
@@ -402,13 +414,30 @@ class EnquiryStoreOperationsTest extends WP_UnitTestCase {
 		$this->assertSame(
 			array(
 				array(
-					'id'         => $older,
-					'created_at' => '2024-09-02 12:00:00',
-					'status'     => 'closed',
+					'id'               => $older,
+					'created_at'       => '2024-09-02 12:00:00',
+					'status'           => 'closed',
+					'event_type'       => array( 'wedding', 'reception' ),
+					'site_exclusivity' => array( 'whole_site' ),
 				),
 			),
 			$siblings,
 			'Only the other same-email enquiry should be summarised.'
+		);
+
+		$this->assertSame(
+			array(
+				'event_type'       => array(),
+				'site_exclusivity' => array(),
+			),
+			array_intersect_key(
+				EnquiryStore::siblings_by_email( 'ada@example.com', $older )[0],
+				array(
+					'event_type'       => true,
+					'site_exclusivity' => true,
+				)
+			),
+			'A sibling holding no terms should carry both keys, empty.'
 		);
 
 		$both = EnquiryStore::siblings_by_email( 'ada@example.com', 0 );

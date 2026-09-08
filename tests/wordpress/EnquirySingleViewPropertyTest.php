@@ -189,9 +189,37 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 	/**
 	 * The keys a sibling summary holds, and no others (Requirement 13.3).
 	 *
+	 * Both multi-select sets and the closure outcome are part of the summary
+	 * because the panel shows them: what an earlier enquiry from the same address
+	 * was for, and how it ended, is what makes a repeat address worth a second
+	 * look. `closed_from` is derived rather than stored, so it is always present
+	 * and empty for an enquiry that has not closed.
+	 *
 	 * @var string[]
 	 */
-	const SIBLING_KEYS = array( 'id', 'created_at', 'status' );
+	const SIBLING_KEYS = array(
+		'id',
+		'created_at',
+		'status',
+		'event_type',
+		'site_exclusivity',
+		'closed_from',
+	);
+
+	/**
+	 * The multi-select shapes each sharer's sets are rotated through: none, one
+	 * taxonomy only, and both with more than one value.
+	 *
+	 * @var array<int,array<string,string[]>>
+	 */
+	const SIBLING_TERMS = array(
+		array(),
+		array( 'event_type' => array( 'wedding' ) ),
+		array(
+			'event_type'       => array( 'wedding', 'reception' ),
+			'site_exclusivity' => array( 'whole_site', 'grounds' ),
+		),
+	);
 
 	/**
 	 * The administrator every request is made as, and every note is authored by.
@@ -821,10 +849,10 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 
 	/**
 	 * The sibling summary holds every other enquiry sharing the email, holding
-	 * exactly the identifier, `created_at` and status — never the enquiry itself
-	 * and never one sharing nothing with it (Requirement 13.3).
+	 * exactly the keys `SIBLING_KEYS` names — never the enquiry itself and never
+	 * one sharing nothing with it (Requirement 13.3).
 	 *
-	 * @param array  $siblings  Sharers that were written: id, created_at, status.
+	 * @param array  $siblings  Sharers that were written, as their summaries.
 	 * @param int[]  $strangers Identifiers of enquiries sharing no email.
 	 * @param int    $id        Enquiry identifier.
 	 * @param array  $data      Response body.
@@ -848,7 +876,7 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 			$this->assertSame(
 				self::SIBLING_KEYS,
 				array_keys( (array) $sibling ),
-				'A sibling summary should hold the identifier, `created_at` and status, and nothing else.' . $context
+				'A sibling summary should hold exactly the summary keys, and nothing else.' . $context
 			);
 		}
 
@@ -1017,15 +1045,25 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 	 * Write the enquiries sharing the subject's email, and return their
 	 * summaries.
 	 *
+	 * Each sharer's multi-select sets are rotated through empty, single-valued and
+	 * multi-valued rather than drawn, because what the summary has to get right is
+	 * that all three shapes survive the batch read intact and in order — not how
+	 * many values a taxonomy can hold, which is Property 1's subject. Rotating
+	 * covers all three within one iteration whatever the draw made the sibling
+	 * count.
+	 *
 	 * @param string $email    Email every sharer carries.
 	 * @param array  $siblings Generated sharers.
-	 * @return array<int,array{id:int,created_at:string,status:string}>
+	 * @return array<int,array{id:int,created_at:string,status:string,event_type:string[],site_exclusivity:string[],closed_from:string}>
 	 */
 	private function write_siblings( $email, array $siblings ) {
 		$written = array();
+		$index   = 0;
 
 		foreach ( $siblings as $sibling ) {
 			$created = Clock::mysql( $sibling['created_at'] );
+			$terms   = self::SIBLING_TERMS[ $index % count( self::SIBLING_TERMS ) ];
+			++$index;
 
 			$id = $this->write(
 				array(
@@ -1038,13 +1076,23 @@ class EnquirySingleViewPropertyTest extends WP_UnitTestCase {
 					'status_changed_at' => $created,
 					'source'            => 'webhook:fixture',
 				),
-				array( Generators::date_at( 30 ) )
+				array( Generators::date_at( 30 ) ),
+				$terms
 			);
 
+			// `closed_from` is always empty here, including for a sharer holding
+			// `closed`: the status was written straight into the row rather than
+			// reached through `Lifecycle::transition()`, so no `status_changed`
+			// entry records a closure and there is no earlier status to report.
+			// That the outcome is recovered from the trail and not guessed at from
+			// the status column is asserted in `LifecycleTransitionTest`.
 			$written[] = array(
-				'id'         => $id,
-				'created_at' => $created,
-				'status'     => (string) $sibling['status'],
+				'id'               => $id,
+				'created_at'       => $created,
+				'status'           => (string) $sibling['status'],
+				'event_type'       => isset( $terms['event_type'] ) ? $terms['event_type'] : array(),
+				'site_exclusivity' => isset( $terms['site_exclusivity'] ) ? $terms['site_exclusivity'] : array(),
+				'closed_from'      => '',
 			);
 		}
 

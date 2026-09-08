@@ -70,6 +70,12 @@ class Lifecycle {
 	const SETTLED = array( 'converted', 'lost' );
 
 	/**
+	 * The terminal status: `TRANSITIONS` gives it nowhere to go, and nothing else
+	 * in the table leads anywhere but here from a settled status.
+	 */
+	const CLOSED = 'closed';
+
+	/**
 	 * The history entry type a status change appends.
 	 */
 	const HISTORY_TYPE = 'status_changed';
@@ -126,6 +132,58 @@ class Lifecycle {
 	 */
 	public static function is_status( $status ) {
 		return in_array( (string) $status, self::STATUSES, true );
+	}
+
+	/**
+	 * The status each of several enquiries held immediately before it was closed.
+	 *
+	 * `closed` says an enquiry is finished but not how it finished, and the two
+	 * ways it can finish — won or lost — are the distinction anyone reading a
+	 * closed enquiry actually wants. This recovers it rather than storing it a
+	 * second time: the outcome is already in the trail, as the `from` of the
+	 * `status_changed` entry that recorded the closure, so a stored column would
+	 * be a duplicate that could disagree with the history beside it.
+	 *
+	 * Reading the *latest* `status_changed` entry is sound because `closed` is
+	 * terminal: `TRANSITIONS` gives it nowhere to go, so once an enquiry is closed
+	 * its closure is necessarily its last status change. An enquiry whose last
+	 * change was to anything else is not closed, and is absent from the result —
+	 * which is also the answer for an enquiry closed before this trail existed,
+	 * and for one that reached `closed` through a direct write that recorded
+	 * nothing.
+	 *
+	 * @param int[] $enquiry_ids Enquiries to resolve.
+	 * @return array<int,string> The status held before closing, keyed by enquiry
+	 *                           identifier. Only closed enquiries appear.
+	 */
+	public static function closed_from_many( array $enquiry_ids ) {
+		$outcomes = array();
+		$contexts = HistoryRecorder::latest_context_many( $enquiry_ids, self::HISTORY_TYPE );
+
+		foreach ( $contexts as $enquiry_id => $context ) {
+			$to   = isset( $context['to'] ) ? (string) $context['to'] : '';
+			$from = isset( $context['from'] ) ? (string) $context['from'] : '';
+
+			if ( self::CLOSED === $to && '' !== $from ) {
+				$outcomes[ (int) $enquiry_id ] = $from;
+			}
+		}
+
+		return $outcomes;
+	}
+
+	/**
+	 * The status one enquiry held immediately before it was closed.
+	 *
+	 * @param int $enquiry_id Enquiry to resolve.
+	 * @return string The status held before closing, or `''` when the enquiry is
+	 *                not closed or its closure was never recorded.
+	 */
+	public static function closed_from( $enquiry_id ) {
+		$enquiry_id = (int) $enquiry_id;
+		$outcomes   = self::closed_from_many( array( $enquiry_id ) );
+
+		return isset( $outcomes[ $enquiry_id ] ) ? $outcomes[ $enquiry_id ] : '';
 	}
 
 	/**

@@ -34,10 +34,25 @@
  * as something to render while that first read is in flight; it is never a
  * substitute for it, because a list row carries none of what the single-enquiry
  * route adds.
+ *
+ * A transition asks for a comment before it is applied. A status change is the
+ * one write here that is irreversible — the table is forward-only — and "why"
+ * is the part a trail of `new → contacted → lost` never captures on its own, so
+ * the modal is where it gets captured, at the moment the person who knows is
+ * still looking at the enquiry. The comment is optional: the transition is what
+ * the control exists to apply, and refusing a legal move for want of a note
+ * would put record-keeping ahead of the lifecycle.
+ *
+ * An unfinished note is reported upward through `onDirtyChange`, because the
+ * control that would discard it is not in this panel — it is the list's own
+ * close and the side nav's view switch. The panel knows the note is unsaved and
+ * nothing else can, so it says so and leaves the warning to whoever owns the
+ * navigation.
  */
 import { __, sprintf } from '@wordpress/i18n';
 import { useCallback, useEffect, useState } from '@wordpress/element';
 import {
+	Modal,
 	Notice,
 	SelectControl,
 	Spinner,
@@ -97,6 +112,7 @@ export default function EnquiryDetail( {
 	enquiry: selected = null,
 	onClose,
 	onChanged,
+	onDirtyChange,
 } ) {
 	const enquiryId =
 		Number( id ) || ( selected && Number( selected.id ) ) || 0;
@@ -118,6 +134,13 @@ export default function EnquiryDetail( {
 	const [ calendars, setCalendars ] = useState( [] );
 	const [ calendar, setCalendar ] = useState( '' );
 	const [ chosen, setChosen ] = useState( '' );
+
+	// The transition awaiting its comment, and the comment being written. The
+	// target status doubles as the modal's open flag: there is no state in which
+	// the modal is open without one, so a separate boolean could only ever
+	// contradict it.
+	const [ pending, setPending ] = useState( '' );
+	const [ comment, setComment ] = useState( '' );
 
 	const read = useCallback( async () => {
 		const fresh = await getEnquiry( enquiryId );
@@ -171,6 +194,20 @@ export default function EnquiryDetail( {
 			live = false;
 		};
 	}, [ enquiryId ] );
+
+	// Whether the note box holds something not yet added. Reported on every
+	// change, and reported false on unmount: a panel that has gone is holding
+	// nothing, and leaving the flag set would make the next navigation warn about
+	// a note that no longer exists.
+	useEffect( () => {
+		if ( ! onDirtyChange ) {
+			return undefined;
+		}
+
+		onDirtyChange( '' !== note.trim() );
+
+		return () => onDirtyChange( false );
+	}, [ note, onDirtyChange ] );
 
 	const status = enquiry ? String( enquiry.status || '' ) : '';
 	const isClosed = CLOSED === status;
@@ -261,6 +298,35 @@ export default function EnquiryDetail( {
 		}
 	};
 
+	/**
+	 * Apply the transition the modal was opened for, with whatever comment was
+	 * written for it.
+	 *
+	 * The modal closes first, before the write starts: the panel's own spinner and
+	 * its notices are where the outcome is reported, so keeping the dialog up over
+	 * them would hide the answer behind the question. A failure therefore lands on
+	 * a closed modal, which is right — the transition was refused, and reopening
+	 * the comment box would invite the user to write the comment again for a move
+	 * that is not going to happen.
+	 */
+	const cancelPending = () => {
+		setPending( '' );
+		setComment( '' );
+	};
+
+	const applyPending = async () => {
+		const target = pending;
+		const written = comment;
+
+		cancelPending();
+
+		await run(
+			`status:${ target }`,
+			() => setEnquiryStatus( enquiryId, target, written ),
+			( result ) => statusNotice( target, result )
+		)();
+	};
+
 	const onSaved = ( saved ) => {
 		if ( saved && 'object' === typeof saved && Number( saved.id ) === enquiryId ) {
 			setFetched( saved );
@@ -318,7 +384,10 @@ export default function EnquiryDetail( {
 							enquiryId
 						) }
 					</span>
-					<StatusBadge status={ status } />
+					<StatusBadge
+						status={ status }
+						closedFrom={ enquiry.closed_from }
+					/>
 					{ !! enquiry.is_test && (
 						<span className="meh-badge meh-badge--test">
 							{ __( 'Test', 'marthrown-enquiry-hub' ) }
@@ -366,19 +435,10 @@ export default function EnquiryDetail( {
 								type="button"
 								className="button button-primary"
 								disabled={ !! busy }
-								onClick={ run(
-									`status:${ target }`,
-									() => setEnquiryStatus( enquiryId, target ),
-									() =>
-										sprintf(
-											/* translators: %s: the new status. */
-											__(
-												'Status set to %s.',
-												'marthrown-enquiry-hub'
-											),
-											statusLabel( target )
-										)
-								) }
+								onClick={ () => {
+									setComment( '' );
+									setPending( target );
+								} }
 							>
 								{ transitionLabel( target ) }
 							</button>
@@ -427,6 +487,56 @@ export default function EnquiryDetail( {
 
 						{ busy && <Spinner /> }
 					</div>
+
+					{ /* One dialog for whichever transition was clicked, rather
+					     than one per button: the target status is the only thing
+					     that differs between them. */ }
+					{ pending && (
+						<Modal
+							title={ transitionLabel( pending ) }
+							className="meh-status-modal"
+							onRequestClose={ cancelPending }
+						>
+							<p className="meh-status-modal__lead">
+								{ sprintf(
+									/* translators: %s: the status the enquiry is moving to. */
+									__(
+										'This enquiry will move to %s. Add a comment saying why — it is kept as a note on the enquiry.',
+										'marthrown-enquiry-hub'
+									),
+									statusLabel( pending )
+								) }
+							</p>
+
+							<TextareaControl
+								label={ __(
+									'Comment (optional)',
+									'marthrown-enquiry-hub'
+								) }
+								value={ comment }
+								onChange={ setComment }
+								rows={ 4 }
+								__nextHasNoMarginBottom
+							/>
+
+							<div className="meh-status-modal__actions">
+								<button
+									type="button"
+									className="button"
+									onClick={ cancelPending }
+								>
+									{ __( 'Cancel', 'marthrown-enquiry-hub' ) }
+								</button>
+								<button
+									type="button"
+									className="button button-primary"
+									onClick={ applyPending }
+								>
+									{ transitionLabel( pending ) }
+								</button>
+							</div>
+						</Modal>
+					) }
 
 					{ convertible && (
 						<div className="meh-detail__convert">
@@ -521,9 +631,19 @@ export default function EnquiryDetail( {
 							</span>
 							{ 'synced' !== enquiry.crm_sync_state &&
 								! isClosed && (
+									/* An underlined link, not a button: it sits
+									   inline in a summary row beside the sync
+									   state and the CRM link, and WordPress's
+									   own `button-link` is defined only in
+									   wp-admin's CSS — on the front end it fell
+									   back to the browser's default button, a
+									   full-size grey control in the middle of a
+									   sentence. `meh-link-button` is the same
+									   idea, declared here so it holds wherever
+									   the panel is rendered. */
 									<button
 										type="button"
-										className="button-link"
+										className="meh-link-button"
 										disabled={ !! busy }
 										onClick={ run(
 											'retry-crm',
@@ -603,10 +723,39 @@ export default function EnquiryDetail( {
 										</span>
 										<StatusBadge
 											status={ sibling.status }
+											closedFrom={
+												sibling.closed_from
+											}
 										/>
 										<span className="meh-muted">
 											{ text( sibling.created_at ) }
 										</span>
+
+										{ /* What the enquiry was for, which is
+										     what makes a repeat address worth
+										     looking at: the same person asking
+										     again about the same kind of event
+										     reads very differently from two
+										     unrelated enquiries. Labelled,
+										     because "wedding" and "whole site"
+										     are not self-describing side by
+										     side. */ }
+										<dl className="meh-detail__sibling-terms">
+											<dt>{ LABELS.event_type }</dt>
+											<dd>
+												{ terms(
+													sibling.event_type
+												) }
+											</dd>
+											<dt>
+												{ LABELS.site_exclusivity }
+											</dt>
+											<dd>
+												{ terms(
+													sibling.site_exclusivity
+												) }
+											</dd>
+										</dl>
 									</li>
 								) ) }
 							</ul>
@@ -829,6 +978,43 @@ function ChangedFields( { context } ) {
 				</li>
 			) ) }
 		</ul>
+	);
+}
+
+/**
+ * What a completed transition is reported as.
+ *
+ * The route applies the transition first and the comment second, so the two can
+ * land separately: a comment `NoteService` refused leaves a status change that
+ * did happen and a note that did not. That is reported as one sentence about each
+ * rather than as a bare success, because a user who wrote a comment and is told
+ * only "Status set to Lost" has no way to know the comment went nowhere.
+ *
+ * @param {string} target Status the transition led to.
+ * @param {Object} result The route's response.
+ * @return {string} Notice text.
+ */
+function statusNotice( target, result ) {
+	const applied = sprintf(
+		/* translators: %s: the new status. */
+		__( 'Status set to %s.', 'marthrown-enquiry-hub' ),
+		statusLabel( target )
+	);
+
+	const noteError = result && result.note_error ? String( result.note_error ) : '';
+
+	if ( '' === noteError ) {
+		return applied;
+	}
+
+	return sprintf(
+		/* translators: 1: the "Status set to …" sentence, 2: why the note was refused. */
+		__(
+			'%1$s The comment was not saved: %2$s',
+			'marthrown-enquiry-hub'
+		),
+		applied,
+		noteError
 	);
 }
 
