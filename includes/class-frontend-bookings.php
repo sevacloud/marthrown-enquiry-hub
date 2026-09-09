@@ -7,6 +7,11 @@
  * Auth). Renders a self-contained, noindex page hosting the same React bundle
  * used in wp-admin.
  *
+ * The hub's views are addressable: /bookings is the Overview and each other view
+ * has a path of its own, /bookings/calendar. Both are the same page — the view
+ * arrives as a query var the app reads on mount — so a view can be linked to and
+ * bookmarked, and reloading one comes back to it rather than to the Overview.
+ *
  * @package MarthrownEnquiryHub
  */
 
@@ -23,6 +28,30 @@ class FrontendBookings {
 
 	const ROUTE     = 'bookings';
 	const QUERY_VAR = 'meh_bookings';
+
+	/**
+	 * Query var naming the view within the hub.
+	 */
+	const VIEW_QUERY_VAR = 'meh_view';
+
+	/**
+	 * The views that have a URL of their own, as the path segment naming each.
+	 *
+	 * The Overview is not one of them: it is the hub's root, and a view that is
+	 * the root has no segment to name it. Anything not in this list is not a
+	 * view, and `/bookings/whatever` is not the hub — the rule is built from
+	 * these names rather than from `([^/]+)`, so an unknown segment 404s as it
+	 * should instead of quietly rendering the Overview under a made-up URL.
+	 *
+	 * The React side keeps the same list. A view added here needs adding there
+	 * too, and until it is, the server routes a URL the app will not honour.
+	 */
+	const VIEWS = array( 'calendar' );
+
+	/**
+	 * The view a request without one is asking for.
+	 */
+	const DEFAULT_VIEW = 'overview';
 
 	/**
 	 * Option holding the version the rewrite rule was last flushed for.
@@ -85,10 +114,40 @@ class FrontendBookings {
 	}
 
 	/**
-	 * Register the /bookings rewrite rule.
+	 * Register the hub's rewrite rules.
 	 */
 	public static function add_rewrite() {
-		add_rewrite_rule( self::pattern(), 'index.php?' . self::QUERY_VAR . '=1', 'top' );
+		foreach ( self::rules() as $pattern => $target ) {
+			add_rewrite_rule( $pattern, $target, 'top' );
+		}
+	}
+
+	/**
+	 * The hub's rewrite rules, as pattern => target.
+	 *
+	 * Two, because the hub has two kinds of URL: its root, and one path per view
+	 * that is not the root. Both end at the same page — the view is a query var
+	 * the React app reads, not a different template — so that `/bookings/calendar`
+	 * can be typed, linked and bookmarked rather than only arrived at by clicking.
+	 *
+	 * @return array<string, string> Rewrite rules.
+	 */
+	public static function rules() {
+		$hub = 'index.php?' . self::QUERY_VAR . '=1';
+
+		return array(
+			self::pattern()      => $hub,
+			self::view_pattern() => $hub . '&' . self::VIEW_QUERY_VAR . '=$matches[1]',
+		);
+	}
+
+	/**
+	 * The rewrite patterns the hub needs stored, in registration order.
+	 *
+	 * @return string[]
+	 */
+	public static function patterns() {
+		return array_keys( self::rules() );
 	}
 
 	/**
@@ -98,6 +157,30 @@ class FrontendBookings {
 	 */
 	public static function pattern() {
 		return '^' . self::ROUTE . '/?$';
+	}
+
+	/**
+	 * The rewrite pattern matching one named view, e.g. /bookings/calendar.
+	 *
+	 * @return string
+	 */
+	public static function view_pattern() {
+		return '^' . self::ROUTE . '/(' . implode( '|', self::VIEWS ) . ')/?$';
+	}
+
+	/**
+	 * The view this request is asking for.
+	 *
+	 * Anything that is not a view of its own is the Overview, which is what the
+	 * hub's root shows and what wp-admin shows: the query var is absent on both,
+	 * and absent is not an error.
+	 *
+	 * @return string One of self::VIEWS, or self::DEFAULT_VIEW.
+	 */
+	public static function current_view() {
+		$view = (string) get_query_var( self::VIEW_QUERY_VAR, '' );
+
+		return in_array( $view, self::VIEWS, true ) ? $view : self::DEFAULT_VIEW;
 	}
 
 	/**
@@ -172,14 +255,29 @@ class FrontendBookings {
 	}
 
 	/**
-	 * Whether the stored rewrite rules can route /bookings.
+	 * Whether the stored rewrite rules can route every hub URL.
+	 *
+	 * Every one of them, not just the root: adding a view adds a pattern, and a
+	 * rule set stored before it existed routes the root perfectly well while
+	 * 404ing the new URL. Checking the whole set is what turns that into one
+	 * repair flush on the first request after the deploy.
 	 *
 	 * @return bool
 	 */
 	public static function rule_is_stored() {
 		$rules = get_option( 'rewrite_rules' );
 
-		return is_array( $rules ) && isset( $rules[ self::pattern() ] );
+		if ( ! is_array( $rules ) ) {
+			return false;
+		}
+
+		foreach ( self::patterns() as $pattern ) {
+			if ( ! isset( $rules[ $pattern ] ) ) {
+				return false;
+			}
+		}
+
+		return true;
 	}
 
 	/**
@@ -206,16 +304,24 @@ class FrontendBookings {
 	 */
 	public static function add_query_var( $vars ) {
 		$vars[] = self::QUERY_VAR;
+		$vars[] = self::VIEW_QUERY_VAR;
 		return $vars;
 	}
 
 	/**
 	 * The hub's own URL, which is where login returns a visitor to.
 	 *
+	 * @param string $view Optional view to link to; the Overview when omitted.
 	 * @return string
 	 */
-	public static function url() {
-		return home_url( '/' . self::ROUTE . '/' );
+	public static function url( $view = '' ) {
+		$path = '/' . self::ROUTE . '/';
+
+		if ( in_array( (string) $view, self::VIEWS, true ) ) {
+			$path .= $view . '/';
+		}
+
+		return home_url( $path );
 	}
 
 	/**

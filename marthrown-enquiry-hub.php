@@ -3,7 +3,7 @@
  * Plugin Name:       Marthrown Enquiry Hub
  * Plugin URI:        https://github.com/marthrown/marthrown-enquiry-hub
  * Description:        Unified hub to manage WP Booking System bookings (current, upcoming, past) and event enquiries. The plugin owns its enquiry tables: the website form posts to the intake webhook, the hub stores and works the enquiry, and FluentCRM Pro, when present, is linked to as the contact record.
- * Version:           0.3.7
+ * Version:           0.4.0
  * Author:            Liamarjit @ Seva Cloud
  * License:           GPL-2.0-or-later
  * License URI:       https://www.gnu.org/licenses/gpl-2.0.html
@@ -23,7 +23,7 @@ if ( ! defined( 'ABSPATH' ) ) {
  * Constants
  * -------------------------------------------------------------------------
  */
-define( 'MEH_VERSION', '0.3.7' );
+define( 'MEH_VERSION', '0.4.0' );
 define( 'MEH_PLUGIN_FILE', __FILE__ );
 define( 'MEH_PLUGIN_DIR', plugin_dir_path( __FILE__ ) );
 define( 'MEH_PLUGIN_URL', plugin_dir_url( __FILE__ ) );

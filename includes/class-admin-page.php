@@ -124,6 +124,16 @@ class AdminPage {
 				 * moved, because the server-rendered copy is what a visitor sees
 				 * before the bundle has loaded.
 				 */
+				/*
+				 * Where the hub lives and which of its views this request asked
+				 * for. The app reads both on mount: `hubUrl` tells it whether it
+				 * is on the front-end route, whose path can carry the view, or in
+				 * wp-admin, where the page is fixed and the view has to travel as
+				 * a query arg instead. `view` is what the URL asked for, so a
+				 * reload of /bookings/calendar comes back to the calendar.
+				 */
+				'hubUrl'          => esc_url_raw( FrontendBookings::url() ),
+				'view'            => FrontendBookings::current_view(),
 				'userName'        => wp_get_current_user()->display_name,
 				'dashboardUrl'    => esc_url_raw( admin_url() ),
 				'logoutUrl'       => esc_url_raw( wp_logout_url( FrontendBookings::url() ) ),

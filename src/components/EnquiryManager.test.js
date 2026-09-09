@@ -8,7 +8,7 @@
  * the path, the method, and the exact set of keys in the body.
  *
  * It also owns both ways out of an open enquiry — its own "Back to list" and the
- * side nav's request for the list, which arrives as `homeSignal` — and so it owns
+ * side nav's request for the list, which arrives as `selection` — and so it owns
  * the warning that stands between an unfinished note and either of them. That is
  * asserted here rather than in the panel, because the panel is not where the
  * decision is made: it only reports that there is something to lose.
@@ -81,9 +81,10 @@ const LIST = {
  * Render the list and wait for its first read to land.
  *
  * @param {Object} handlers Extra apiFetch handlers.
+ * @param {Object} props    Props for the component under test.
  * @return {Promise<Object>} Render result.
  */
-async function renderList( handlers = {} ) {
+async function renderList( handlers = {}, props = {} ) {
 	apiFetch.mockImplementation(
 		respondWith( {
 			'GET enquiries': () => LIST,
@@ -91,7 +92,7 @@ async function renderList( handlers = {} ) {
 		} )
 	);
 
-	const rendered = render( <EnquiryManager /> );
+	const rendered = render( <EnquiryManager { ...props } /> );
 
 	await waitFor( () =>
 		expect( screen.getByText( 'Ada Lovelace' ) ).toBeTruthy()
@@ -298,17 +299,97 @@ describe( 'EnquiryManager unsaved-note guard', () => {
 		const { rerender } = await openEnquiry();
 		await writeNote( 'Rang, no answer.' );
 
-		// The side nav puts the question before it sends the signal, so honouring
-		// the signal must not put it a second time. `homeSignal` is a rising number
+		// The side nav puts the question before it sends the request, so honouring
+		// the request must not put it a second time. `seq` is a rising number
 		// rather than a boolean, so a second Overview click is a second request.
 		await act( async () => {
-			rerender( <EnquiryManager homeSignal={ 1 } /> );
+			rerender( <EnquiryManager selection={ { id: 0, seq: 1 } } /> );
 		} );
 
 		expect( window.confirm ).not.toHaveBeenCalled();
 		expect(
 			screen.queryByRole( 'button', { name: 'Back to list' } )
 		).toBeNull();
+	} );
+} );
+
+describe( 'EnquiryManager selection contract', () => {
+	it( 'opens the enquiry it was handed, which is how a pasted URL arrives', async () => {
+		apiFetch.mockImplementation(
+			respondWith( {
+				'GET enquiries': () => LIST,
+				'GET enquiries/1': () => DETAIL,
+				'GET calendars': () => ( { available: true, calendars: [] } ),
+			} )
+		);
+
+		render( <EnquiryManager selection={ { id: 1, seq: 0 } } /> );
+
+		// Nothing was clicked: the id came in with the first render, and the panel
+		// is what the first paint shows.
+		await waitFor( () =>
+			expect(
+				screen.getByRole( 'button', { name: 'Back to list' } )
+			).toBeTruthy()
+		);
+	} );
+
+	it( 'reports opening and closing, so the URL can say which enquiry is open', async () => {
+		const onSelect = jest.fn();
+
+		await openEnquiry( {}, { onSelect } );
+
+		expect( onSelect ).toHaveBeenLastCalledWith( 1 );
+
+		await act( async () => {
+			fireEvent.click(
+				screen.getByRole( 'button', { name: 'Back to list' } )
+			);
+		} );
+
+		expect( onSelect ).toHaveBeenLastCalledWith( 0 );
+	} );
+
+	it( 'honours a request for an enquiry without reporting it back', async () => {
+		const onSelect = jest.fn();
+		const { rerender } = await renderList(
+			{
+				'GET enquiries/1': () => DETAIL,
+				'GET calendars': () => ( { available: true, calendars: [] } ),
+			},
+			{ onSelect, selection: { id: 0, seq: 0 } }
+		);
+
+		await act( async () => {
+			rerender(
+				<EnquiryManager
+					onSelect={ onSelect }
+					selection={ { id: 1, seq: 1 } }
+				/>
+			);
+		} );
+
+		expect(
+			screen.getByRole( 'button', { name: 'Back to list' } )
+		).toBeTruthy();
+
+		// The nav asked for this one — telling it would be repeating what it
+		// already knows, and on a Back it would push the step being undone.
+		expect( onSelect ).not.toHaveBeenCalled();
+	} );
+
+	it( 'closes the panel when the create form is opened, so the URL stops naming it', async () => {
+		const onSelect = jest.fn();
+
+		await openEnquiry( {}, { onSelect } );
+
+		await act( async () => {
+			fireEvent.click(
+				screen.getByRole( 'button', { name: 'New enquiry' } )
+			);
+		} );
+
+		expect( onSelect ).toHaveBeenLastCalledWith( 0 );
 	} );
 } );
 
@@ -341,14 +422,17 @@ const DETAIL = {
  * @param {Object} handlers Extra apiFetch handlers.
  * @return {Promise<Object>} Render result.
  */
-async function openEnquiry( handlers = {} ) {
-	const rendered = await renderList( {
-		'GET enquiries/1': () => DETAIL,
-		// The first row has a candidate date and no booking, so the convert
-		// control is offered and reads the calendars.
-		'GET calendars': () => ( { available: true, calendars: [] } ),
-		...handlers,
-	} );
+async function openEnquiry( handlers = {}, props = {} ) {
+	const rendered = await renderList(
+		{
+			'GET enquiries/1': () => DETAIL,
+			// The first row has a candidate date and no booking, so the convert
+			// control is offered and reads the calendars.
+			'GET calendars': () => ( { available: true, calendars: [] } ),
+			...handlers,
+		},
+		props
+	);
 
 	await act( async () => {
 		fireEvent.click( screen.getByRole( 'button', { name: 'Ada Lovelace' } ) );

@@ -24,9 +24,16 @@
  * The toolbar's new-enquiry control opens `EnquiryForm` with no enquiry, which
  * is the form's create mode: empty fields, `POST` to `/enquiries`
  * (Requirement 18.23).
+ *
+ * Which enquiry is open is state here and a query arg in the URL, and the two are
+ * kept in step by talking to the side nav rather than to the address bar: every
+ * open and close is reported through `onSelect`, and anything that arrives by URL
+ * — a pasted link, Back, Forward — arrives back as a `selection` request. The nav
+ * owns the URL because it owns the view that is in it; this component owns the
+ * panel.
  */
 import { __ } from '@wordpress/i18n';
-import { useState, useCallback, useEffect } from '@wordpress/element';
+import { useState, useCallback, useEffect, useRef } from '@wordpress/element';
 import { Notice } from '@wordpress/components';
 import usePolling from '../hooks/usePolling';
 import { getEnquiries, enquiriesExportUrl } from '../api';
@@ -93,7 +100,8 @@ export default function EnquiryManager( {
 	title,
 	defaultStatus = 'all',
 	headingLevel = 2,
-	homeSignal = 0,
+	selection = null,
+	onSelect,
 	onDirtyChange,
 } ) {
 	const heading = title || __( 'Event Enquiries', 'marthrown-enquiry-hub' );
@@ -116,7 +124,13 @@ export default function EnquiryManager( {
 		page: 1,
 		per_page: 25,
 	} );
-	const [ selectedId, setSelectedId ] = useState( 0 );
+
+	// Which enquiry is open. The caller may have arrived with one already in mind —
+	// it is in the URL, and the URL is the side nav's to read — so the opening
+	// value comes from the selection it passed rather than from nothing.
+	const [ selectedId, setSelectedId ] = useState( () =>
+		toId( selection ? selection.id : 0 )
+	);
 	const [ creating, setCreating ] = useState( false );
 
 	// Whether the open detail panel holds a note that has not been added. Kept
@@ -135,14 +149,33 @@ export default function EnquiryManager( {
 	const selectedRow =
 		items.find( ( row ) => Number( row.id ) === selectedId ) || null;
 
+	// Say which enquiry is open, so the URL can say the same. Nothing here waits
+	// to be told back: the panel has already opened or closed, and the report is
+	// only how the address bar catches up.
+	const report = useCallback(
+		( id ) => {
+			if ( onSelect ) {
+				onSelect( id );
+			}
+		},
+		[ onSelect ]
+	);
+
+	// Show an enquiry, or the list when it is 0, resetting the two states that
+	// belong to whatever was on screen before.
+	const show = useCallback( ( id ) => {
+		setCreating( false );
+		setSelectedId( toId( id ) );
+		setNoteDirty( false );
+	}, [] );
+
 	// Both panels close back to the list and reread it: a created enquiry is a
 	// new row, and a transition, note or edit applied in the panel changes one.
 	const closePanels = useCallback( () => {
-		setCreating( false );
-		setSelectedId( 0 );
-		setNoteDirty( false );
+		show( 0 );
+		report( 0 );
 		refetch();
-	}, [ refetch ] );
+	}, [ refetch, show, report ] );
 
 	// Closing on the user's own initiative, which is the only case that can lose
 	// work. `closePanels` itself stays unguarded, because the paths that call it
@@ -156,20 +189,38 @@ export default function EnquiryManager( {
 		closePanels();
 	}, [ noteDirty, closePanels ] );
 
-	// The side nav asking for the list back. It arrives as a rising number rather
-	// than a boolean so that a second click of an already-selected Overview is a
-	// second request rather than a no-op, and the nav has nothing to reset.
+	// The side nav asking for an enquiry — for the list, when it asks for none.
+	// It arrives as an id beside a rising `seq` rather than as the id alone, so
+	// that a second click of an already-selected Overview is a second request
+	// rather than a no-op, and the nav has nothing to reset. The id can be an
+	// enquiry rather than only 0 because the nav reads it from the URL, which is
+	// where Back, Forward and a pasted link all arrive.
+	//
+	// Nothing is reported back: the nav asked for this, so telling it would only
+	// be repeating what it already knows.
 	//
 	// Unguarded on purpose: the nav asked about the unsaved note before it sent
-	// the signal, so asking again here would be the same question twice.
+	// the request, so asking again here would be the same question twice.
+	const requestSeq = selection ? selection.seq : 0;
+
+	// The request this component opened with counts as honoured: the id is already
+	// in `selectedId`, and treating it as new work would spend a second read of the
+	// list on arriving where it had arrived. Only what comes after mount is a
+	// request to act on — including a mount at a non-zero `seq`, which is what
+	// switching back from the Calendar looks like.
+	const honoured = useRef( requestSeq );
+
 	useEffect( () => {
-		if ( homeSignal > 0 ) {
-			closePanels();
+		if ( requestSeq !== honoured.current ) {
+			honoured.current = requestSeq;
+			show( selection.id );
+			refetch();
 		}
-		// Only the signal should trigger this. Including `closePanels` would
-		// return the user to the list every time the list refetched.
+		// Only a new request should trigger this. Including `refetch` would return
+		// the user to the list every time the list refetched, and including the id
+		// would do it on every render that passed a fresh selection object.
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [ homeSignal ] );
+	}, [ requestSeq ] );
 
 	// Upward, so the nav can ask before it switches away and unmounts the panel.
 	useEffect( () => {
@@ -177,6 +228,15 @@ export default function EnquiryManager( {
 			onDirtyChange( noteDirty );
 		}
 	}, [ noteDirty, onDirtyChange ] );
+
+	// A row being opened. Local first and reported second: the panel is what the
+	// click was for, and the URL is how it can be sent to someone else.
+	const openEnquiry = ( id ) => {
+		const next = toId( id );
+
+		setSelectedId( next );
+		report( next );
+	};
 
 	// A created enquiry returns the user to the list, where the new row is: the
 	// panel that would open on it reads a route of its own, and nothing about a
@@ -192,7 +252,10 @@ export default function EnquiryManager( {
 						type="button"
 						className="button"
 						onClick={ () => {
+							// The form is not an enquiry, so the URL stops naming
+							// the one that was open behind it.
 							setSelectedId( 0 );
+							report( 0 );
 							setCreating( true );
 						} }
 					>
@@ -253,7 +316,7 @@ export default function EnquiryManager( {
 					rows={ items }
 					rowKey={ ( row ) => row.id }
 					renderCell={ ( row, column ) =>
-						renderEnquiryCell( row, column, setSelectedId )
+						renderEnquiryCell( row, column, openEnquiry )
 					}
 					loading={ loading && ! data }
 					error={ error }
@@ -272,14 +335,26 @@ export default function EnquiryManager( {
 }
 
 /**
+ * An enquiry id as a positive integer, or 0 for "none open".
+ *
+ * @param {*} value Candidate id.
+ * @return {number} Id, or 0.
+ */
+function toId( value ) {
+	const id = Number.parseInt( value, 10 );
+
+	return Number.isFinite( id ) && id > 0 ? id : 0;
+}
+
+/**
  * One cell of the enquiry list, by column key.
  *
- * @param {Object}   row           Listed enquiry.
- * @param {Object}   column        `{ key, label }` from COLUMNS.
- * @param {Function} setSelectedId Opens the detail panel on this row's id.
+ * @param {Object}   row     Listed enquiry.
+ * @param {Object}   column  `{ key, label }` from COLUMNS.
+ * @param {Function} onOpen  Opens the detail panel on this row's id.
  * @return {*} Cell content.
  */
-function renderEnquiryCell( row, column, setSelectedId ) {
+function renderEnquiryCell( row, column, onOpen ) {
 	switch ( column.key ) {
 		case 'name':
 			return (
@@ -291,9 +366,7 @@ function renderEnquiryCell( row, column, setSelectedId ) {
 					<button
 						type="button"
 						className="meh-row-open"
-						onClick={ () =>
-							setSelectedId( Number.parseInt( row.id, 10 ) )
-						}
+						onClick={ () => onOpen( row.id ) }
 					>
 						{ fullName( row ) }
 					</button>

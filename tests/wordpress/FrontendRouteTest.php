@@ -71,6 +71,11 @@ class FrontendRouteTest extends WP_UnitTestCase {
 		delete_option( FrontendBookings::FLUSH_OPTION );
 
 		FrontendBookings::add_rewrite();
+
+		// What `init()` registers, registered here too: without it the view var is
+		// stripped from the query and `go_to()` could never see one. Hooks are
+		// backed up and restored around every test, so this does not leak.
+		add_filter( 'query_vars', array( FrontendBookings::class, 'add_query_var' ) );
 	}
 
 	public function tear_down() {
@@ -111,6 +116,147 @@ class FrontendRouteTest extends WP_UnitTestCase {
 			FrontendBookings::rule_is_stored(),
 			'A flush should leave the rule where a request can find it.'
 		);
+	}
+
+	/**
+	 * Every rule the hub registers is a rule the flush check knows to look for.
+	 *
+	 * The check is what turns a deploy that adds a URL into one repair flush, so a
+	 * rule registered but never looked for would be a URL that 404s until
+	 * something unrelated flushed — and a pattern looked for but never registered
+	 * would ask for a flush on every request and never find it.
+	 *
+	 * @return void
+	 */
+	public function test_the_registered_rules_are_the_rules_that_are_looked_for() {
+		global $wp_rewrite;
+
+		// Ours among other people's: the sitemap and REST rules are registered at
+		// the top of the set as well, so the comparison is over the rules for our
+		// own route rather than over everything there.
+		$ours = array_values(
+			array_filter(
+				array_keys( $wp_rewrite->extra_rules_top ),
+				static function ( $pattern ) {
+					return 0 === strpos( $pattern, '^' . FrontendBookings::ROUTE );
+				}
+			)
+		);
+
+		$this->assertSame(
+			FrontendBookings::patterns(),
+			$ours,
+			'The registered set and the checked set should be the same set.'
+		);
+	}
+
+	/**
+	 * A view has a URL of its own, and it reaches the hub with the view named.
+	 *
+	 * @return void
+	 */
+	public function test_a_view_url_reaches_the_hub_carrying_the_view() {
+		FrontendBookings::maybe_flush();
+
+		$this->go_to( FrontendBookings::url( 'calendar' ) );
+
+		$this->assertNotEmpty(
+			get_query_var( FrontendBookings::QUERY_VAR ),
+			'/bookings/calendar should be the hub.'
+		);
+		$this->assertSame( 'calendar', FrontendBookings::current_view() );
+	}
+
+	/**
+	 * The hub's root is the Overview, which is the view nothing names.
+	 *
+	 * @return void
+	 */
+	public function test_the_hub_root_is_the_overview() {
+		FrontendBookings::maybe_flush();
+
+		$this->go_to( FrontendBookings::url() );
+
+		$this->assertNotEmpty( get_query_var( FrontendBookings::QUERY_VAR ) );
+		$this->assertSame( FrontendBookings::DEFAULT_VIEW, FrontendBookings::current_view() );
+	}
+
+	/**
+	 * A segment that is not a view is not the hub either.
+	 *
+	 * The rule is built from the view names rather than from `([^/]+)`, so an
+	 * invented URL 404s as it should instead of quietly rendering the Overview
+	 * under an address that means nothing.
+	 *
+	 * @return void
+	 */
+	public function test_an_unknown_segment_is_not_the_hub() {
+		FrontendBookings::maybe_flush();
+
+		$this->go_to( home_url( '/' . FrontendBookings::ROUTE . '/nonsense/' ) );
+
+		$this->assertEmpty(
+			get_query_var( FrontendBookings::QUERY_VAR ),
+			'Only the hub root and its named views should route to the hub.'
+		);
+	}
+
+	/**
+	 * A view var holding something that is not a view reads as the Overview.
+	 *
+	 * The rewrite cannot produce one, but a hand-written `/?meh_view=` can, and
+	 * the app is handed a view name it has to be able to trust.
+	 *
+	 * @return void
+	 */
+	public function test_a_view_var_that_names_nothing_reads_as_the_overview() {
+		set_query_var( FrontendBookings::VIEW_QUERY_VAR, 'nonsense' );
+
+		$this->assertSame( FrontendBookings::DEFAULT_VIEW, FrontendBookings::current_view() );
+	}
+
+	/**
+	 * `url()` links to a view, and refuses to invent one.
+	 *
+	 * @return void
+	 */
+	public function test_url_links_to_a_view_and_only_to_a_real_one() {
+		$this->assertSame(
+			home_url( '/' . FrontendBookings::ROUTE . '/calendar/' ),
+			FrontendBookings::url( 'calendar' )
+		);
+
+		// A URL nothing routes would be a link to a 404, so the hub root is what a
+		// name the hub does not have is worth.
+		$this->assertSame( FrontendBookings::url(), FrontendBookings::url( 'nonsense' ) );
+	}
+
+	/**
+	 * A rule set stored before a view existed is repaired, root and all.
+	 *
+	 * This is the state every environment is in on the first request after a
+	 * deploy that adds a view: the root routes perfectly well, and the new URL
+	 * 404s until the rules are flushed again.
+	 *
+	 * @return void
+	 */
+	public function test_a_rule_set_stored_before_a_view_existed_is_repaired() {
+		global $wp_rewrite;
+
+		$wp_rewrite->extra_rules_top = array(
+			FrontendBookings::pattern() => 'index.php?' . FrontendBookings::QUERY_VAR . '=1',
+		);
+		flush_rewrite_rules( false );
+
+		$this->assertFalse(
+			FrontendBookings::rule_is_stored(),
+			'A set holding only the root should not count as routable.'
+		);
+
+		FrontendBookings::add_rewrite();
+
+		$this->assertTrue( FrontendBookings::maybe_flush(), 'The missing view rule should be flushed for.' );
+		$this->assertTrue( FrontendBookings::rule_is_stored(), 'Every hub URL should route again.' );
 	}
 
 	/**

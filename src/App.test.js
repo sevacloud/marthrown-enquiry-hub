@@ -15,6 +15,12 @@
  * question is put here, where the navigation actually happens — which means the
  * question has to be put *before* anything moves, so that cancelling leaves both
  * the view and the open panel exactly as they were.
+ *
+ * *The URL is where the app is.* The view and the open enquiry are both in it, so
+ * a view can be linked to, a reload comes back to it, and an enquiry can be handed
+ * over as a URL. Back and Forward are navigation like any other click, except that
+ * they have already happened by the time the app hears — so the note warning is
+ * put afterwards there, and refusing it puts the URL back.
  */
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import apiFetch from '@wordpress/api-fetch';
@@ -104,7 +110,18 @@ beforeEach( () => {
 
 	originalConfirm = window.confirm;
 
-	window.mehData = { wpbsUrl: '', settingsUrl: '', isAdmin: false };
+	window.mehData = {
+		wpbsUrl: '',
+		settingsUrl: '',
+		isAdmin: false,
+		// Where the front-end hub lives, which is what tells the routing module
+		// that the path is ours to write views into.
+		hubUrl: 'http://localhost/bookings/',
+	};
+
+	// jsdom keeps one location for the whole file, so every test starts from the
+	// hub root rather than from wherever the last one navigated to.
+	window.history.replaceState( {}, '', '/bookings/' );
 } );
 
 afterEach( () => {
@@ -179,6 +196,169 @@ describe( 'App navigation', () => {
 		expect(
 			screen.queryByRole( 'button', { name: 'Back to list' } )
 		).toBeNull();
+	} );
+} );
+
+describe( 'App routing', () => {
+	/**
+	 * Where the address bar is.
+	 *
+	 * @return {string} Path and query string.
+	 */
+	const url = () => window.location.pathname + window.location.search;
+
+	/**
+	 * A Back or Forward step, as the app sees one.
+	 *
+	 * The browser moves the location and then says so; `history.back()` does the
+	 * same thing but asynchronously, and what is under test is the reaction rather
+	 * than jsdom's session history. So the location is put where the step lands and
+	 * the event the app listens for is fired.
+	 *
+	 * @param {string} to Path and query string the step lands on.
+	 * @return {Promise<void>} Resolves once the app has reacted.
+	 */
+	async function step( to ) {
+		await act( async () => {
+			window.history.replaceState( {}, '', to );
+			window.dispatchEvent( new PopStateEvent( 'popstate' ) );
+		} );
+	}
+
+	it( 'gives the Calendar a URL of its own', async () => {
+		render( <App /> );
+
+		await waitFor( () =>
+			expect( screen.getByText( 'Ada Lovelace' ) ).toBeTruthy()
+		);
+
+		expect( url() ).toBe( '/bookings/' );
+
+		await navigate( 'Calendar View' );
+
+		expect( url() ).toBe( '/bookings/calendar/' );
+
+		await navigate( 'Overview' );
+
+		expect( url() ).toBe( '/bookings/' );
+	} );
+
+	it( 'opens at the view its URL asked for', async () => {
+		window.history.replaceState( {}, '', '/bookings/calendar/' );
+
+		render( <App /> );
+
+		// The calendar's own month control, so this is the calendar and not a list
+		// that happens to have rendered.
+		await waitFor( () =>
+			expect( screen.getByLabelText( 'Month' ) ).toBeTruthy()
+		);
+
+		expect( screen.queryByText( 'Ada Lovelace' ) ).toBeNull();
+	} );
+
+	it( 'names the open enquiry in the URL, and stops naming it on the way back', async () => {
+		await openEnquiry();
+
+		expect( url() ).toBe( '/bookings/?enquiry=1' );
+
+		await act( async () => {
+			fireEvent.click(
+				screen.getByRole( 'button', { name: 'Back to list' } )
+			);
+		} );
+
+		expect( url() ).toBe( '/bookings/' );
+	} );
+
+	it( 'opens the enquiry a pasted URL names', async () => {
+		window.history.replaceState( {}, '', '/bookings/?enquiry=1' );
+
+		render( <App /> );
+
+		await waitFor( () =>
+			expect(
+				screen.getByRole( 'button', { name: 'Back to list' } )
+			).toBeTruthy()
+		);
+	} );
+
+	it( 'follows Back out of an enquiry and Forward into it again', async () => {
+		await openEnquiry();
+
+		await step( '/bookings/' );
+
+		expect(
+			screen.queryByRole( 'button', { name: 'Back to list' } )
+		).toBeNull();
+
+		await step( '/bookings/?enquiry=1' );
+
+		expect(
+			screen.getByRole( 'button', { name: 'Back to list' } )
+		).toBeTruthy();
+	} );
+
+	it( 'follows Back out of the Calendar', async () => {
+		render( <App /> );
+
+		await waitFor( () =>
+			expect( screen.getByText( 'Ada Lovelace' ) ).toBeTruthy()
+		);
+
+		await navigate( 'Calendar View' );
+		await step( '/bookings/' );
+
+		expect( screen.getByText( 'Ada Lovelace' ) ).toBeTruthy();
+	} );
+
+	it( 'puts the URL back when Back is refused over an unsaved note', async () => {
+		window.confirm = jest.fn( () => false );
+
+		await openEnquiry();
+
+		await act( async () => {
+			fireEvent.change( screen.getByLabelText( 'Add a note' ), {
+				target: { value: 'Rang, no answer.' },
+			} );
+		} );
+
+		await step( '/bookings/' );
+
+		expect( window.confirm ).toHaveBeenCalledTimes( 1 );
+
+		// The step had already been taken, so refusing it means undoing it: the
+		// panel stays, the note stays, and the address bar says so again.
+		expect(
+			screen.getByRole( 'button', { name: 'Back to list' } )
+		).toBeTruthy();
+		expect( screen.getByLabelText( 'Add a note' ).value ).toBe(
+			'Rang, no answer.'
+		);
+		expect( url() ).toBe( '/bookings/?enquiry=1' );
+	} );
+
+	it( 'writes the view as a query arg where the path is not ours', async () => {
+		// wp-admin: the screen is `admin.php?page=…`, and that arg has to survive
+		// every navigation the app makes.
+		window.mehData = { ...window.mehData, hubUrl: '' };
+		window.history.replaceState(
+			{},
+			'',
+			'/wp-admin/admin.php?page=marthrown-enquiry-hub'
+		);
+
+		render( <App /> );
+
+		await waitFor( () =>
+			expect( screen.getByText( 'Ada Lovelace' ) ).toBeTruthy()
+		);
+
+		await navigate( 'Calendar View' );
+
+		expect( url() ).toBe(
+			'/wp-admin/admin.php?page=marthrown-enquiry-hub&view=calendar'
+		);
 	} );
 } );
 
