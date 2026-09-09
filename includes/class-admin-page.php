@@ -116,6 +116,17 @@ class AdminPage {
 				'isAdmin'         => current_user_can( 'manage_options' ),
 				'settingsUrl'     => esc_url_raw( Settings::url() ),
 				'wpbsUrl'         => esc_url_raw( admin_url( 'admin.php?page=wpbs-bookings' ) ),
+				/*
+				 * Who is signed in, and the two ways out. The front-end header
+				 * renders the same three things server-side, but there is no room
+				 * for them beside the logo on a phone, so the nav drawer carries
+				 * them there and the header hides them. Localised rather than
+				 * moved, because the server-rendered copy is what a visitor sees
+				 * before the bundle has loaded.
+				 */
+				'userName'        => wp_get_current_user()->display_name,
+				'dashboardUrl'    => esc_url_raw( admin_url() ),
+				'logoutUrl'       => esc_url_raw( wp_logout_url( FrontendBookings::url() ) ),
 			)
 		);
 	}

@@ -38,7 +38,8 @@ function daysIn( ym ) {
 }
 
 /**
- * The overview for a month, with one booking on one calendar.
+ * The overview for a month: one converted booking, and one entered straight into
+ * WP Booking System with no enquiry — and so no event type — behind it.
  *
  * @param {string} ym 'YYYY-MM'.
  * @return {Object} Response body.
@@ -57,10 +58,20 @@ function overview( ym ) {
 					{
 						id: 41,
 						guest: 'Ada Lovelace',
+						event_type: [ 'Wedding' ],
 						status: 'accepted',
 						start_date: `${ ym }-02`,
 						end_date: `${ ym }-04`,
 						view_url: 'https://example.test/booking=41',
+					},
+					{
+						id: 42,
+						guest: 'Grace Hopper',
+						event_type: [],
+						status: 'pending',
+						start_date: `${ ym }-08`,
+						end_date: `${ ym }-09`,
+						view_url: 'https://example.test/booking=42',
 					},
 				],
 				placeholders: [],
@@ -133,6 +144,27 @@ describe( 'CalendarView', () => {
 		} );
 
 		expect( marked() ).toEqual( [] );
+	} );
+
+	it( 'names the customer and the event type on hover', async () => {
+		const { container } = await open();
+
+		const [ wedding, unconverted ] = [
+			...container.querySelectorAll( '.meh-calendar-booking' ),
+		].map( ( bar ) => bar.getAttribute( 'title' ) );
+
+		expect( wedding.split( '\n' ) ).toEqual( [
+			'Ada Lovelace',
+			'Wedding',
+			`#41 ${ THIS_MONTH }-02 → ${ THIS_MONTH }-04`,
+		] );
+
+		// No enquiry behind it, so no event type — and no blank line where one
+		// would have been.
+		expect( unconverted.split( '\n' ) ).toEqual( [
+			'Grace Hopper',
+			`#42 ${ THIS_MONTH }-08 → ${ THIS_MONTH }-09`,
+		] );
 	} );
 
 	it( 'moves to the month and year the selects name', async () => {

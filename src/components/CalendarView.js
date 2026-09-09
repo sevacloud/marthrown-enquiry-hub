@@ -162,6 +162,49 @@ function todayColumnStyle( day, days ) {
 }
 
 /**
+ * What hovering a booking bar says about it.
+ *
+ * The bar itself has room for the identifier and a truncated name, so the
+ * tooltip is where the rest goes: who the booking is for and what kind of event
+ * it is, then the identifier and the dates. Three lines rather than one run-on
+ * string, because a native `title` honours newlines and the customer's name is
+ * the thing being looked for.
+ *
+ * The event type comes from the enquiry the booking was converted from, so a
+ * booking entered straight into WP Booking System has none — that line is
+ * dropped rather than left empty, as is the name on a booking whose form
+ * carried no recognisable one.
+ *
+ * @param {Object} booking Booking as `GET /bookings/calendar` returns it.
+ * @return {string} Tooltip text.
+ */
+function bookingTooltip( booking ) {
+	const lines = [];
+
+	if ( booking.guest ) {
+		lines.push( booking.guest );
+	}
+
+	const types = ( booking.event_type || [] ).filter( Boolean );
+
+	if ( types.length ) {
+		lines.push( types.join( ', ' ) );
+	}
+
+	lines.push(
+		sprintf(
+			/* translators: 1: booking id 2: start date 3: end date */
+			__( '#%1$s %2$s → %3$s', 'marthrown-enquiry-hub' ),
+			booking.id,
+			booking.start_date,
+			booking.end_date
+		)
+	);
+
+	return lines.join( '\n' );
+}
+
+/**
  * The weekday/day-number ruler, one column per day of the month.
  *
  * @param {Object}      props
@@ -297,7 +340,11 @@ export default function CalendarView() {
 					>
 						›
 					</Button>
-					<Button variant="secondary" onClick={ () => load( month ) }>
+					<Button
+						variant="secondary"
+						className="meh-calendar-refresh"
+						onClick={ () => load( month ) }
+					>
 						{ __( 'Refresh', 'marthrown-enquiry-hub' ) }
 					</Button>
 				</div>
@@ -431,16 +478,8 @@ export default function CalendarView() {
 															item.endDay + 1
 														}`,
 													} }
-													title={ sprintf(
-														/* translators: 1: id 2: guest 3: start 4: end */
-														__(
-															'#%1$s %2$s (%3$s → %4$s)',
-															'marthrown-enquiry-hub'
-														),
-														item.booking.id,
-														item.booking.guest || '',
-														item.booking.start_date,
-														item.booking.end_date
+													title={ bookingTooltip(
+														item.booking
 													) }
 												>
 													#{ item.booking.id }

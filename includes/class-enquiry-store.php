@@ -1180,6 +1180,74 @@ class EnquiryStore {
 	}
 
 	/**
+	 * Event types of the enquiries a set of bookings was converted from.
+	 *
+	 * What the calendar overview hovers over: a booking carries a guest name and
+	 * dates of its own, but the kind of event is the enquiry's, so it can only be
+	 * reached back through `booking_id`.
+	 *
+	 * Two queries for the whole month rather than two per booking — the same
+	 * batch read `siblings_by_email()` uses. A booking with no enquiry behind it,
+	 * which is any booking entered straight into WP Booking System, is simply
+	 * absent from the result rather than present and empty: the caller adds the
+	 * key either way, and an absent booking is not a mistake to report.
+	 *
+	 * Should two enquiries somehow name the same booking, the lower identifier
+	 * wins — the enquiry that was converted, since `BookingCreator` refuses a
+	 * second conversion and `duplicate()` does not copy `booking_id`.
+	 *
+	 * @param int[] $booking_ids WP Booking System booking identifiers.
+	 * @return array<int,string[]> booking_id => event types, in stored order.
+	 */
+	public static function event_types_by_booking( array $booking_ids ) {
+		global $wpdb;
+
+		$booking_ids = self::identifiers( $booking_ids );
+
+		if ( ! $booking_ids ) {
+			return array();
+		}
+
+		$table        = Schema::table( 'enquiries' );
+		$placeholders = implode( ', ', array_fill( 0, count( $booking_ids ), '%d' ) );
+
+		$sql = "SELECT id, booking_id FROM {$table} WHERE booking_id IN ( {$placeholders} )"
+			. ' ORDER BY id ASC';
+
+		$rows = $wpdb->get_results( $wpdb->prepare( $sql, $booking_ids ), ARRAY_A ); // phpcs:ignore WordPress.DB
+
+		if ( ! is_array( $rows ) || ! $rows ) {
+			return array();
+		}
+
+		$enquiry_of = array();
+
+		foreach ( $rows as $row ) {
+			$booking = isset( $row['booking_id'] ) ? (int) $row['booking_id'] : 0;
+			$enquiry = isset( $row['id'] ) ? (int) $row['id'] : 0;
+
+			if ( $booking > 0 && $enquiry > 0 && ! isset( $enquiry_of[ $booking ] ) ) {
+				$enquiry_of[ $booking ] = $enquiry;
+			}
+		}
+
+		$terms = self::terms_for_many( array_values( $enquiry_of ) );
+		$types = array();
+
+		foreach ( $enquiry_of as $booking => $enquiry ) {
+			$of_enquiry = isset( $terms[ $enquiry ]['event_type'] )
+				? array_values( array_filter( (array) $terms[ $enquiry ]['event_type'], 'strlen' ) )
+				: array();
+
+			if ( $of_enquiry ) {
+				$types[ $booking ] = $of_enquiry;
+			}
+		}
+
+		return $types;
+	}
+
+	/**
 	 * Identifiers of settled enquiries that settled before a given time.
 	 *
 	 * The read behind the auto-closure job. The status list comes from

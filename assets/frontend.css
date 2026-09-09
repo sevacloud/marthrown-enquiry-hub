@@ -118,6 +118,18 @@ body.meh-frontend > .meh-staging-banner {
 	font-size: 13px;
 }
 
+/* Below the hub's own breakpoint the header is the logo and nothing else: three
+   more items beside it wrapped onto a second line and took a third of a phone
+   screen with them. The app's nav drawer carries the same name and the same two
+   links at this width, which is where the burger menu already is — so this is a
+   move rather than a loss. Kept in the markup and hidden, because it is
+   server-rendered and appears before the bundle has loaded. */
+@media screen and (max-width: 782px) {
+	.meh-frontend-user {
+		display: none;
+	}
+}
+
 /* Provide WP-admin-like table styling on the front end, since the wp-admin
    `widefat` styles are not loaded outside the dashboard. */
 .meh-frontend .widefat {

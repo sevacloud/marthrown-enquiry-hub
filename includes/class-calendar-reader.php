@@ -87,7 +87,7 @@ class CalendarReader {
 		$result = array(
 			'month'     => $label,
 			'days'      => $days,
-			'calendars' => $calendars,
+			'calendars' => self::with_event_types( $calendars ),
 		);
 
 		/**
@@ -119,6 +119,46 @@ class CalendarReader {
 			delete_transient( self::CACHE_PREFIX . gmdate( 'Ym', $cursor ) );
 			$cursor = strtotime( '+1 month', $cursor );
 		}
+	}
+
+	/**
+	 * Attach each booking's event type, read from the enquiry behind it.
+	 *
+	 * WP Booking System holds no event type — it is the enquiry's, and the
+	 * calendar's tooltip is the one place that wants both. Resolved here, once
+	 * for the whole month rather than per calendar, so the cost is two queries
+	 * however many calendars the site has, and it lands inside the cached month
+	 * so a hover costs nothing at all.
+	 *
+	 * Every booking gets the key, empty when nothing is behind it: a booking
+	 * entered straight into WP Booking System has no enquiry, and a reader should
+	 * not have to tell that apart from a missing field.
+	 *
+	 * @param array $calendars Calendars, each with a `bookings` list.
+	 * @return array The same calendars, bookings carrying `event_type`.
+	 */
+	protected static function with_event_types( array $calendars ) {
+		$ids = array();
+
+		foreach ( $calendars as $calendar ) {
+			foreach ( (array) $calendar['bookings'] as $booking ) {
+				$ids[] = isset( $booking['id'] ) ? (int) $booking['id'] : 0;
+			}
+		}
+
+		$types = $ids ? EnquiryStore::event_types_by_booking( $ids ) : array();
+
+		foreach ( $calendars as $c => $calendar ) {
+			foreach ( (array) $calendar['bookings'] as $b => $booking ) {
+				$id = isset( $booking['id'] ) ? (int) $booking['id'] : 0;
+
+				$calendars[ $c ]['bookings'][ $b ]['event_type'] = isset( $types[ $id ] )
+					? $types[ $id ]
+					: array();
+			}
+		}
+
+		return $calendars;
 	}
 
 	/**

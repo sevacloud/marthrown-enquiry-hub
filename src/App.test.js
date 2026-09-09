@@ -182,6 +182,133 @@ describe( 'App navigation', () => {
 	} );
 } );
 
+describe( 'App nav drawer', () => {
+	/**
+	 * Whether the nav is open, as the stylesheet reads it.
+	 *
+	 * The drawer is a CSS state on the layout — there is no width measured in
+	 * JavaScript — so the class is what there is to assert.
+	 *
+	 * @return {boolean}
+	 */
+	const isOpen = () =>
+		!! document.querySelector( '.meh-layout.is-nav-open' );
+
+	it( 'opens on the burger and closes when a destination is chosen', async () => {
+		render( <App /> );
+
+		await waitFor( () =>
+			expect( screen.getByText( 'Ada Lovelace' ) ).toBeTruthy()
+		);
+
+		expect( isOpen() ).toBe( false );
+
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: 'Menu' } ) );
+		} );
+
+		expect( isOpen() ).toBe( true );
+		expect( screen.getByRole( 'button', { name: 'Menu' } ).getAttribute( 'aria-expanded' ) ).toBe( 'true' );
+
+		await navigate( 'Calendar View' );
+
+		// The drawer covers the view it just navigated to, so choosing is also
+		// dismissing.
+		expect( isOpen() ).toBe( false );
+	} );
+
+	it( 'stays open when the note warning is refused', async () => {
+		window.confirm = jest.fn( () => false );
+
+		await openEnquiry();
+
+		await act( async () => {
+			fireEvent.change( screen.getByLabelText( 'Add a note' ), {
+				target: { value: 'Rang, no answer.' },
+			} );
+		} );
+
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: 'Menu' } ) );
+		} );
+
+		await navigate( 'Calendar View' );
+
+		// Nothing moved, so the nav is still on screen to choose again from.
+		expect( isOpen() ).toBe( true );
+		expect(
+			screen.getByRole( 'button', { name: 'Back to list' } )
+		).toBeTruthy();
+	} );
+
+	it( 'closes on the backdrop and on Escape', async () => {
+		render( <App /> );
+
+		await waitFor( () =>
+			expect( screen.getByText( 'Ada Lovelace' ) ).toBeTruthy()
+		);
+
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: 'Menu' } ) );
+		} );
+
+		await act( async () => {
+			fireEvent.click(
+				screen.getByRole( 'button', { name: 'Close menu' } )
+			);
+		} );
+
+		expect( isOpen() ).toBe( false );
+
+		await act( async () => {
+			fireEvent.click( screen.getByRole( 'button', { name: 'Menu' } ) );
+		} );
+
+		await act( async () => {
+			fireEvent.keyDown( document, { key: 'Escape' } );
+		} );
+
+		expect( isOpen() ).toBe( false );
+	} );
+
+	it( 'carries the signed-in line and its links for the narrow layout', async () => {
+		window.mehData = {
+			...window.mehData,
+			userName: 'Ada Lovelace',
+			dashboardUrl: 'https://example.test/wp-admin/',
+			logoutUrl: 'https://example.test/logout',
+		};
+
+		render( <App /> );
+
+		await waitFor( () =>
+			expect( screen.getByText( 'Ada Lovelace' ) ).toBeTruthy()
+		);
+
+		const account = document.querySelector( '.meh-sidenav__account' );
+
+		expect( account.textContent ).toContain( 'Signed in as Ada Lovelace' );
+		expect(
+			[ ...account.querySelectorAll( 'a' ) ].map( ( a ) => a.href )
+		).toEqual( [
+			'https://example.test/wp-admin/',
+			'https://example.test/logout',
+		] );
+	} );
+
+	it( 'says nothing about an account it was told nothing about', async () => {
+		render( <App /> );
+
+		await waitFor( () =>
+			expect( screen.getByText( 'Ada Lovelace' ) ).toBeTruthy()
+		);
+
+		// The admin screen localises no user block, and an empty bordered strip at
+		// the foot of the drawer would be all this rendered there.
+		expect( document.querySelector( '.meh-sidenav__account' ) ).toBeNull();
+	} );
+} );
+
 describe( 'App unsaved-note guard', () => {
 	it( 'asks before Overview discards a note, and stays put when refused', async () => {
 		window.confirm = jest.fn( () => false );

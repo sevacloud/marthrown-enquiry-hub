@@ -484,6 +484,70 @@ class EnquiryStoreOperationsTest extends WP_UnitTestCase {
 	}
 
 	/* ---------------------------------------------------------------------
+	 * event_types_by_booking()
+	 * ------------------------------------------------------------------ */
+
+	/**
+	 * A booking's event types are the ones held by the enquiry it was converted
+	 * from, keyed by booking rather than by enquiry — which is what the calendar
+	 * overview has to hand when it labels a bar.
+	 *
+	 * Only bookings with something to say appear. A booking no enquiry names, and
+	 * a booking whose enquiry holds no event type, are both absent rather than
+	 * present and empty: the reader supplies the empty case itself, and an absent
+	 * booking is not a failure to report.
+	 *
+	 * @return void
+	 */
+	public function test_event_types_by_booking_reads_through_the_converted_enquiry() {
+		$this->seed_enquiry(
+			array(
+				'email'      => 'ada@example.com',
+				'booking_id' => 41,
+			),
+			array(),
+			array(
+				'event_type'       => array( 'wedding', 'reception' ),
+				'site_exclusivity' => array( 'whole_site' ),
+			)
+		);
+
+		// Converted, but nothing was ever asked about the kind of event.
+		$this->seed_enquiry(
+			array(
+				'email'      => 'grace@example.com',
+				'booking_id' => 42,
+			)
+		);
+
+		// Not converted at all, and holding a term that must not leak into any
+		// booking's answer.
+		$this->seed_enquiry(
+			array( 'email' => 'joan@example.com' ),
+			array(),
+			array( 'event_type' => array( 'party' ) )
+		);
+
+		$this->assertSame(
+			array( 41 => array( 'wedding', 'reception' ) ),
+			EnquiryStore::event_types_by_booking( array( 41, 42, 43 ) ),
+			'Only a booking whose enquiry holds event types should be answered.'
+		);
+
+		$this->assertSame(
+			array(),
+			EnquiryStore::event_types_by_booking( array() ),
+			'No bookings asked about is no query and no answer.'
+		);
+
+		$this->assertSame(
+			array(),
+			EnquiryStore::event_types_by_booking( array( 0, -1 ) ),
+			'A booking identifier that cannot exist is not looked up.'
+		);
+	}
+
+	/* ---------------------------------------------------------------------
 	 * settled_before()
 	 * ------------------------------------------------------------------ */
 
