@@ -611,9 +611,40 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 	align-items: center;
 	gap: 8px;
 
+	/* The month/year pickers. Left as native selects, like the calendar picker
+	   in the Bookings Manager's copy of this bar, so they inherit the admin
+	   theme's own control on both the admin screen and the front end. */
 	.meh-calendar-month {
-		min-width: 74px;
-		text-align: center;
+		display: inline-flex;
+		align-items: center;
+		gap: 6px;
+
+		select {
+			font-size: 13px;
+		}
+	}
+
+	/* The arrows sit on the brand green, where the button's default slate blue
+	   is close to unreadable. `.components-button` keeps this at the same
+	   specificity as the component's own colour rules, and the states are
+	   restated because hover and focus set a colour of their own. */
+	.meh-calendar-nav__arrow.components-button {
+		color: #fbfbff;
+		font-size: 18px;
+		line-height: 1;
+
+		&:hover:not( :disabled ),
+		&:focus:not( :disabled ),
+		&:active:not( :disabled ) {
+			color: #fbfbff;
+		}
+
+		/* The default focus ring is the same slate blue, which all but
+		   disappears against the green. */
+		&:focus:not( :disabled ) {
+			box-shadow: 0 0 0 2px rgba( 251, 251, 255, 0.7 );
+			outline: 2px solid transparent;
+		}
 	}
 }
 
@@ -625,13 +656,40 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 	color: #646970;
 }
 
+/* One scrolling region for the whole grid rather than one per row. Each row used
+   to scroll its own lanes, which meant the weekday header could never stay lined
+   up with the rows under it — scrolling one row moved nothing else. Scrolling
+   here moves the header and every row together. */
+.meh-calendar-grid-wrap {
+	overflow-x: auto;
+}
+
 .meh-calendar-row {
 	display: flex;
 	align-items: stretch;
 	border-bottom: 1px solid #f0f0f1;
+	/* The row head plus the day grid's own minimum. Set here because the row is
+	   what the shared scroller scrolls, and because the today-column tint is a
+	   percentage gradient on the lanes: it only lines up with the `1fr` columns
+	   while the lanes are exactly as wide as the grid inside them, so the lanes
+	   must never be squeezed narrower than it. */
+	min-width: 1090px;
 
 	&:first-child {
 		border-top: 1px solid #f0f0f1;
+	}
+}
+
+/* The weekday/day-number ruler above the calendars. It is a row like any other
+   so that it lines up with them, but it has no calendar of its own. */
+.meh-calendar-headrow {
+	border-bottom: 1px solid #dcdcde;
+
+	/* No calendar name to carry, so it drops the row heads' grey — but it keeps
+	   an opaque background, because it is pinned over the ruler that scrolls
+	   underneath it. */
+	.meh-calendar-rowhead {
+		background: #fff;
 	}
 }
 
@@ -641,6 +699,11 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 	font-weight: 600;
 	border-right: 1px solid #dcdcde;
 	background: #f6f7f7;
+	/* Pinned while the grid scrolls sideways: the calendar's name is what tells
+	   you which row you are reading, so it has to stay put. */
+	position: sticky;
+	left: 0;
+	z-index: 1;
 
 	.meh-count {
 		font-weight: 400;
@@ -651,14 +714,15 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 .meh-calendar-lanes {
 	flex: 1 1 auto;
 	min-width: 0;
-	overflow-x: auto;
 	padding: 4px 0;
 }
 
 .meh-calendar-daygrid,
 .meh-calendar-lane {
 	display: grid;
-	min-width: 620px;
+	/* Wide enough for a 31-day month to give every column room for the longest
+	   weekday abbreviation ("Thurs"). */
+	min-width: 930px;
 }
 
 .meh-calendar-daygrid {
@@ -669,6 +733,19 @@ $wpbs-booking-colors: #2271b1, #00a32a, #bd8600, #7f54b3, #d63638, #007e94,
 		color: #a7aaad;
 		text-align: center;
 		border-left: 1px solid #f6f7f7;
+
+		/* Today's column carries the tint from the lanes' gradient behind it;
+		   this is the label on top of it. */
+		&.is-today {
+			color: #097464;
+			font-weight: 700;
+		}
+	}
+
+	.meh-calendar-dow {
+		display: block;
+		text-transform: uppercase;
+		letter-spacing: 0.02em;
 	}
 }
 
