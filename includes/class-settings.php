@@ -452,8 +452,10 @@ class Settings {
 				'end_option'        => self::OPT_INTAKE_END_DATE,
 				'start_label'       => __( 'Ideal start date field', 'marthrown-enquiry-hub' ),
 				'end_label'         => __( 'Ideal end date field', 'marthrown-enquiry-hub' ),
-				'start_description' => __( 'Payload field holding the first day of the enquirer\'s ideal date range. Every enquiry needs one range, so a submission carrying neither this nor an explicit date_ranges value is rejected.', 'marthrown-enquiry-hub' ),
-				'end_description'   => __( 'Payload field holding the last day of the ideal range. Both fields must be named here and present in a submission for the range to be read; where the enquirer picked a single day, the form should send it as both.', 'marthrown-enquiry-hub' ),
+				/* translators: 1: default start date payload field name. */
+				'start_description' => sprintf( __( 'Payload field holding the first day of the enquirer\'s ideal date range. Leave blank to read %1$s from the payload. Every enquiry needs one range, so a submission carrying neither this nor an explicit date_ranges value is rejected.', 'marthrown-enquiry-hub' ), IntakeEndpoint::DEFAULT_DATE_FIELDS[0] ),
+				/* translators: 1: default end date payload field name. */
+				'end_description'   => sprintf( __( 'Payload field holding the last day of the ideal range. Leave blank to read %1$s. Both fields must be present in a submission for the range to be read; where the enquirer picked a single day, the form should send it as both.', 'marthrown-enquiry-hub' ), IntakeEndpoint::DEFAULT_DATE_FIELDS[1] ),
 			),
 		);
 

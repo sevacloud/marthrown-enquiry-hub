@@ -218,7 +218,10 @@ namespace MarthrownEnquiryHub\Tests\Fakes {
 			$this->legend[ $calendar_id ][ (int) $id ] = array(
 				'id'           => (int) $id,
 				'calendar_id'  => $calendar_id,
-				'title'        => (string) $title,
+				// `name`, not `title`: a real WPBS_Legend_Item has no `title`, and
+				// asking it for one is what filled the live debug log with
+				// "Undefined property" warnings.
+				'name'         => (string) $title,
 				// WPBS returns colour as an array; SourceWpbs reads element 0.
 				'color'        => array( (string) $color ),
 				'is_default'   => $is_default ? 1 : 0,
@@ -535,15 +538,26 @@ namespace MarthrownEnquiryHub\Tests\Fakes {
 	 *
 	 * Stands in for a WPBS calendar, booking or legend item object: a value bag
 	 * answering get( $key ), plus the get_name() helper SourceWpbs prefers.
+	 *
+	 * The values are held as real properties rather than in an array, because
+	 * WPBS's own object base resolves `get( $key )` to a property and therefore
+	 * raises "Undefined property" for a key the record does not carry. A fake that
+	 * held them in an array answered `property_exists()` with false for every key,
+	 * so code probing for a key before reading it could not be exercised at all —
+	 * and code reading a key WPBS does not have looked perfectly fine here while
+	 * filling the live site's debug log with warnings.
+	 *
+	 * `get()` itself stays tolerant of an absent key, returning null rather than
+	 * warning: what the fake is faithful about is which keys a record *has*.
+	 *
+	 * The attribute is a comment on PHP 7.4 and suppresses the PHP 8.2 dynamic
+	 * property deprecation on newer versions. Root-namespaced deliberately:
+	 * attribute names resolve against the current namespace, so an unqualified
+	 * `AllowDynamicProperties` here would name a class in this namespace that does
+	 * not exist and suppress nothing.
 	 */
+	#[\AllowDynamicProperties]
 	class FakeWpbsRecord {
-
-		/**
-		 * Values.
-		 *
-		 * @var array
-		 */
-		protected $data;
 
 		/**
 		 * Constructor.
@@ -551,7 +565,9 @@ namespace MarthrownEnquiryHub\Tests\Fakes {
 		 * @param array $data Values.
 		 */
 		public function __construct( array $data ) {
-			$this->data = $data;
+			foreach ( $data as $key => $value ) {
+				$this->{$key} = $value;
+			}
 		}
 
 		/**
@@ -561,7 +577,7 @@ namespace MarthrownEnquiryHub\Tests\Fakes {
 		 * @return mixed|null
 		 */
 		public function get( $key ) {
-			return array_key_exists( $key, $this->data ) ? $this->data[ $key ] : null;
+			return property_exists( $this, $key ) ? $this->{$key} : null;
 		}
 
 		/**
@@ -579,7 +595,7 @@ namespace MarthrownEnquiryHub\Tests\Fakes {
 		 * @return array
 		 */
 		public function to_array() {
-			return $this->data;
+			return get_object_vars( $this );
 		}
 	}
 }

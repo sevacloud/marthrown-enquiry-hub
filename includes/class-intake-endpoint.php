@@ -97,12 +97,36 @@ class IntakeEndpoint {
 	 *
 	 * A sending form's webhook action offers no way to submit a date range as one
 	 * field, so a range arrives as two: a start date and an end date in separate
-	 * payload fields. Both options have to hold a non-empty value, and both
-	 * configured fields have to resolve to a parseable date, for a range to be
-	 * read.
+	 * payload fields. Both configured fields have to be present in the payload and
+	 * both have to resolve to a parseable date for a range to be read.
+	 *
+	 * Left unconfigured, the pair falls back to the default names below rather than
+	 * reading nothing — see `DEFAULT_DATE_FIELDS`.
 	 */
 	const START_DATE_FIELD_OPTION = 'meh_intake_start_date_field';
 	const END_DATE_FIELD_OPTION   = 'meh_intake_end_date_field';
+
+	/**
+	 * Payload field names the ideal date pair is read from when Settings names none.
+	 *
+	 * Every enquiry needs at least one candidate range, so an unconfigured ideal
+	 * pair is not a site that wants no dates — it is a site that has not filled in
+	 * two boxes, and it would reject every submission it received with
+	 * `too_few_ranges`. Defaulting to the obvious names makes an enquiry form whose
+	 * fields are called `start_date` and `end_date` work with nothing configured,
+	 * which is how every other field already behaves: `FieldMapper` falls back to
+	 * matching a payload label against the enquiry field name.
+	 *
+	 * Matching is the same case- and separator-insensitive comparison used
+	 * everywhere else, so `Start Date`, `start-date` and `startDate` are all read.
+	 * A site whose form names them something else still says so in Settings, and a
+	 * configured value always wins.
+	 *
+	 * Only the ideal pair has defaults. The two alternatives stay opt-in: a webhook
+	 * delivers the one range the visitor picked, and further ranges are added to the
+	 * record by hand once a caller suggests them.
+	 */
+	const DEFAULT_DATE_FIELDS = array( 'start_date', 'end_date' );
 
 	/**
 	 * Options naming the payload fields holding the two optional alternatives.
@@ -183,10 +207,23 @@ class IntakeEndpoint {
 	 * so the Settings screen, the outbound filter and the registered route
 	 * cannot disagree about where intake lives.
 	 *
-	 * @return string The route path alone where `rest_url()` is unavailable.
+	 * `rest_url()` composes the REST root from the site's permalink structure, so
+	 * it reads `$wp_rewrite` — which does not exist until after `plugins_loaded`
+	 * has finished. `attach_secret_header()` below is reached from
+	 * `http_request_args`, and that fires for any outbound request, including one
+	 * another plugin makes from its own `plugins_loaded` handler. Calling
+	 * `rest_url()` there took the whole site down, so the rewrite object is
+	 * checked for and the bare route path returned when it is not there yet.
+	 *
+	 * `is_intake_url()` already refuses a path with no host, so an outbound request
+	 * made that early is left alone rather than mistakenly matched. Nothing is lost
+	 * by that: the loopback POST this filter exists for is made while a form
+	 * submission is being handled, long after the globals are built.
+	 *
+	 * @return string The route path alone where a REST URL cannot yet be composed.
 	 */
 	public static function url() {
-		if ( ! function_exists( 'rest_url' ) ) {
+		if ( ! function_exists( 'rest_url' ) || ! Boot::has_rewrite() ) {
 			return self::NAMESPACE . self::ROUTE;
 		}
 
@@ -653,13 +690,14 @@ class IntakeEndpoint {
 	 * them the request carried into the one `date_ranges` list the Validator and
 	 * the store speak in, ideal range first.
 	 *
-	 * A pair is read only when both its options are configured, both fields are
-	 * present in the payload, and both parse as a date. Anything less is skipped
-	 * rather than half-read: an alternative pair the visitor left blank is the
-	 * ordinary case, and one where only the start arrived is a range whose end
-	 * nobody named. Skipping every pair leaves no `date_ranges` at all, which the
-	 * Validator reports as `too_few_ranges` — the same failure an omitted field
-	 * produces, which is what it is.
+	 * A pair is read only when both its fields are named — configured in Settings,
+	 * or the ideal pair's `DEFAULT_DATE_FIELDS` — and both are present in the
+	 * payload, and both parse as a date. Anything less is skipped rather than
+	 * half-read: an alternative pair the visitor left blank is the ordinary case,
+	 * and one where only the start arrived is a range whose end nobody named.
+	 * Skipping every pair leaves no `date_ranges` at all, which the Validator
+	 * reports as `too_few_ranges` — the same failure an omitted field produces,
+	 * which is what it is.
 	 *
 	 * An explicit `date_ranges` in the payload wins outright: a sender populating
 	 * it has said what it means more directly than a configured field name can,
@@ -683,10 +721,10 @@ class IntakeEndpoint {
 		$ranges = array();
 
 		foreach ( self::date_field_pairs() as $pair ) {
-			list( $start_option, $end_option ) = $pair;
+			list( $start_option, $end_option, $start_default, $end_default ) = $pair;
 
-			$start_field = self::configured_date_field( $start_option );
-			$end_field   = self::configured_date_field( $end_option );
+			$start_field = self::configured_date_field( $start_option, $start_default );
+			$end_field   = self::configured_date_field( $end_option, $end_default );
 
 			if ( '' === $start_field || '' === $end_field ) {
 				continue;
@@ -718,27 +756,44 @@ class IntakeEndpoint {
 	}
 
 	/**
-	 * The configured start/end option pairs, ideal pair first.
+	 * The start/end option pairs, ideal pair first, each with its default.
 	 *
-	 * @return array<int,array{0:string,1:string}>
+	 * Four entries per pair: the two option names, then the payload field name each
+	 * falls back to when its option holds nothing. Only the ideal pair carries
+	 * defaults; the alternatives fall back to nothing, so they are read only where
+	 * the site has named their fields.
+	 *
+	 * @return array<int,array{0:string,1:string,2:string,3:string}>
 	 */
 	protected static function date_field_pairs() {
-		return array_merge(
-			array( array( self::START_DATE_FIELD_OPTION, self::END_DATE_FIELD_OPTION ) ),
-			self::ALTERNATIVE_DATE_FIELD_OPTIONS
+		$pairs = array(
+			array(
+				self::START_DATE_FIELD_OPTION,
+				self::END_DATE_FIELD_OPTION,
+				self::DEFAULT_DATE_FIELDS[0],
+				self::DEFAULT_DATE_FIELDS[1],
+			),
 		);
+
+		foreach ( self::ALTERNATIVE_DATE_FIELD_OPTIONS as $options ) {
+			$pairs[] = array( $options[0], $options[1], '', '' );
+		}
+
+		return $pairs;
 	}
 
 	/**
-	 * A configured start/end date field option, trimmed.
+	 * A start/end date field option, trimmed, or its default.
 	 *
-	 * @param string $option Option name.
-	 * @return string Empty when unconfigured.
+	 * @param string $option  Option name.
+	 * @param string $default Payload field name to use when the option holds nothing.
+	 * @return string Empty when unconfigured and given no default.
 	 */
-	protected static function configured_date_field( $option ) {
+	protected static function configured_date_field( $option, $default = '' ) {
 		$configured = function_exists( 'get_option' ) ? get_option( $option, '' ) : '';
+		$configured = is_scalar( $configured ) ? trim( (string) $configured ) : '';
 
-		return is_scalar( $configured ) ? trim( (string) $configured ) : '';
+		return '' === $configured ? (string) $default : $configured;
 	}
 
 	/**

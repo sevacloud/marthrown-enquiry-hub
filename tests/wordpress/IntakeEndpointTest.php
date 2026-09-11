@@ -355,8 +355,156 @@ class IntakeEndpointTest extends WP_UnitTestCase {
 	}
 
 	/* ---------------------------------------------------------------------
+	 * The ideal range with nothing configured
+	 * ------------------------------------------------------------------ */
+
+	/**
+	 * The enquiry form sends one start date and one end date, and the ideal range
+	 * is read from them without either Settings control being filled in.
+	 *
+	 * Every enquiry needs at least one candidate range, so an unconfigured ideal
+	 * pair would reject every submission the site received. The default names are
+	 * the ones the form uses.
+	 *
+	 * @return void
+	 */
+	public function test_the_ideal_range_is_read_from_the_default_fields_when_settings_names_none() {
+		$this->forget_configured_date_fields();
+
+		$fields = IntakeEndpoint::normalise(
+			$this->request(
+				array(
+					'start_date' => '2025-09-06',
+					'end_date'   => '2025-09-07',
+				)
+			)
+		);
+
+		$this->assertSame(
+			array(
+				array(
+					'start' => '2025-09-06',
+					'end'   => '2025-09-07',
+				),
+			),
+			$fields['date_ranges']
+		);
+
+		foreach ( array( 'start_date', 'end_date' ) as $field ) {
+			$this->assertArrayNotHasKey( $field, $fields, $field . ' is consumed by the range it supplies.' );
+		}
+	}
+
+	/**
+	 * The default names are matched the same loose way as everything else, so a
+	 * form labelling its fields "Start Date" and "End Date" is read too.
+	 *
+	 * @return void
+	 */
+	public function test_the_default_fields_are_matched_ignoring_case_and_separators() {
+		$this->forget_configured_date_fields();
+
+		$fields = IntakeEndpoint::normalise(
+			$this->request(
+				array(
+					'Start Date' => '16/08/2025',
+					'end-date'   => '16/08/2025',
+				)
+			)
+		);
+
+		$this->assertSame(
+			array(
+				array(
+					'start' => '2025-08-16',
+					'end'   => '2025-08-16',
+				),
+			),
+			$fields['date_ranges'],
+			'A single day arrives as a range whose bounds are equal.'
+		);
+	}
+
+	/**
+	 * A configured field still wins: naming one in Settings is a statement about
+	 * where the value comes from, and the default is not consulted at all.
+	 *
+	 * @return void
+	 */
+	public function test_a_configured_field_wins_over_the_default() {
+		update_option( IntakeEndpoint::START_DATE_FIELD_OPTION, 'Arrival' );
+		update_option( IntakeEndpoint::END_DATE_FIELD_OPTION, 'Departure' );
+
+		$fields = IntakeEndpoint::normalise(
+			$this->request(
+				array(
+					'Arrival'    => '2025-09-06',
+					'Departure'  => '2025-09-07',
+					'start_date' => '2030-01-01',
+					'end_date'   => '2030-01-02',
+				)
+			)
+		);
+
+		$this->assertSame(
+			array(
+				array(
+					'start' => '2025-09-06',
+					'end'   => '2025-09-07',
+				),
+			),
+			$fields['date_ranges']
+		);
+
+		// Untouched, because nothing read them: they are ordinary payload fields on
+		// a site that named its date fields something else.
+		$this->assertSame( '2030-01-01', $fields['start_date'] );
+		$this->assertSame( '2030-01-02', $fields['end_date'] );
+	}
+
+	/**
+	 * Only the ideal pair has defaults. A webhook delivers the one range the
+	 * visitor picked; alternatives are added to the record by hand afterwards, so
+	 * an unconfigured alternative pair reads nothing however its fields are named.
+	 *
+	 * @return void
+	 */
+	public function test_the_alternative_pairs_have_no_defaults() {
+		$this->forget_configured_date_fields();
+
+		$fields = IntakeEndpoint::normalise(
+			$this->request(
+				array(
+					'start_date'   => '2025-09-06',
+					'end_date'     => '2025-09-07',
+					'start_date_2' => '2025-09-13',
+					'end_date_2'   => '2025-09-14',
+				)
+			)
+		);
+
+		$this->assertCount( 1, $fields['date_ranges'], 'The ideal range, and nothing else.' );
+		$this->assertSame( '2025-09-13', $fields['start_date_2'], 'An unread field stays in the map.' );
+	}
+
+	/* ---------------------------------------------------------------------
 	 * Helpers
 	 * ------------------------------------------------------------------ */
+
+	/**
+	 * Leave every date field control unset, as a site that has configured none.
+	 *
+	 * @return void
+	 */
+	private function forget_configured_date_fields() {
+		delete_option( IntakeEndpoint::START_DATE_FIELD_OPTION );
+		delete_option( IntakeEndpoint::END_DATE_FIELD_OPTION );
+
+		foreach ( IntakeEndpoint::ALTERNATIVE_DATE_FIELD_OPTIONS as $pair ) {
+			delete_option( $pair[0] );
+			delete_option( $pair[1] );
+		}
+	}
 
 	/**
 	 * Switch duplicate detection off (Requirement 4.4's filter).

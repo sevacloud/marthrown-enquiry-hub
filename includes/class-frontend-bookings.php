@@ -89,11 +89,20 @@ class FrontendBookings {
 	/**
 	 * Force noindex/nofollow on the hub via the wp_robots filter.
 	 *
+	 * `wp_robots` is not only a template filter: `wp_die()` runs it too, which
+	 * means it runs while WordPress renders its own fatal-error page — before
+	 * `$wp_query` exists on a request that died during `plugins_loaded`. Reading a
+	 * query var there threw a second fatal from inside the fatal handler, and the
+	 * site served a blank white page with no critical-error message and no
+	 * recovery-mode email. So the query object is checked for first: with no
+	 * request to inspect, this is not the hub, and the directives pass through
+	 * untouched.
+	 *
 	 * @param array $robots Robots directives.
 	 * @return array
 	 */
 	public static function filter_robots( $robots ) {
-		if ( ! get_query_var( self::QUERY_VAR ) ) {
+		if ( ! Boot::has_query() || ! get_query_var( self::QUERY_VAR ) ) {
 			return $robots;
 		}
 		// wp_robots_no_robots() sets noindex + follow; be explicit instead.
@@ -175,9 +184,17 @@ class FrontendBookings {
 	 * hub's root shows and what wp-admin shows: the query var is absent on both,
 	 * and absent is not an error.
 	 *
+	 * A request with no query object yet has asked for nothing, which is the same
+	 * answer: the Overview. Guarded for the same reason `filter_robots()` is —
+	 * this is public and reading `$wp_query` before it exists is fatal.
+	 *
 	 * @return string One of self::VIEWS, or self::DEFAULT_VIEW.
 	 */
 	public static function current_view() {
+		if ( ! Boot::has_query() ) {
+			return self::DEFAULT_VIEW;
+		}
+
 		$view = (string) get_query_var( self::VIEW_QUERY_VAR, '' );
 
 		return in_array( $view, self::VIEWS, true ) ? $view : self::DEFAULT_VIEW;

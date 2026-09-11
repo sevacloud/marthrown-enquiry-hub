@@ -356,13 +356,37 @@ class SourceWpbs {
 		foreach ( (array) wpbs_get_legend_items( array( 'calendar_id' => $calendar_id ) ) as $item ) {
 			$c = $item->get( 'color' );
 			$map[ (int) $item->get( 'id' ) ] = array(
-				'title'        => (string) $item->get( 'title' ),
+				'title'        => self::legend_title( $item ),
 				'color'        => ( is_array( $c ) && ! empty( $c[0] ) ) ? $c[0] : '',
 				'is_default'   => 1 === (int) $item->get( 'is_default' ),
 				'auto_pending' => (string) $item->get( 'auto_pending' ),
 			);
 		}
 		return $map;
+	}
+
+	/**
+	 * A legend item's display label.
+	 *
+	 * WPBS's object base resolves `get( $key )` to a real property, so asking for
+	 * one the object does not carry raises "Undefined property" — and because this
+	 * runs once per legend item per calendar read, a single wrong key filled the
+	 * site's debug log with 17,920 warnings in a morning. A real
+	 * `WPBS_Legend_Item` has no `title`; the label is under `name`. Both are tried,
+	 * each guarded by `property_exists()`, so this keeps working whichever key a
+	 * given WPBS version uses and warns for neither.
+	 *
+	 * @param object $item WPBS legend item.
+	 * @return string Label, or '' when the item carries neither key.
+	 */
+	protected static function legend_title( $item ) {
+		foreach ( array( 'name', 'title' ) as $key ) {
+			if ( property_exists( $item, $key ) ) {
+				return (string) $item->get( $key );
+			}
+		}
+
+		return '';
 	}
 
 	/**
